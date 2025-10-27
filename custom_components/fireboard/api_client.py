@@ -53,6 +53,7 @@ class FireBoardApiClient:
         self._token: str | None = None
         self._base_url = API_BASE_URL
         self._cookie_jar: aiohttp.CookieJar | None = None
+        self._csrf_token: str | None = None
 
     async def authenticate(self) -> bool:
         """Authenticate with the FireBoard API and capture session cookies.
@@ -67,8 +68,10 @@ class FireBoardApiClient:
         """
         try:
             async with async_timeout.timeout(API_TIMEOUT):
+                # Auth endpoint is at /api/rest-auth/login/ (not /api/v1/)
+                auth_url = self._base_url.replace("/v1", "") + "/rest-auth/login/"
                 response = await self._session.post(
-                    f"{self._base_url}/rest-auth/login/",
+                    auth_url,
                     json={
                         "username": self._email,
                         "password": self._password,
@@ -105,7 +108,23 @@ class FireBoardApiClient:
                 # Store the cookie jar for subsequent requests
                 self._cookie_jar = self._session.cookie_jar
 
-                _LOGGER.debug("Successfully authenticated with FireBoard API")
+                # Extract CSRF token from cookies
+                for cookie in self._cookie_jar:
+                    if cookie.key == "csrftoken":
+                        self._csrf_token = cookie.value
+                        break
+
+                # Debug: Check what cookies we have
+                cookies = [
+                    f"{cookie.key}={cookie.value}"
+                    for cookie in self._cookie_jar
+                ]
+                _LOGGER.debug(
+                    "Successfully authenticated with FireBoard API. "
+                    "Cookies: %s, CSRF: %s",
+                    ", ".join(cookies) if cookies else "None",
+                    self._csrf_token
+                )
                 return True
 
         except aiohttp.ClientError as err:
@@ -145,12 +164,25 @@ class FireBoardApiClient:
         headers["Authorization"] = f"Token {self._token}"
         headers["Content-Type"] = "application/json"
         headers["User-Agent"] = "HomeAssistant-FireBoard-Integration"
+        headers["Referer"] = "https://fireboard.io/"
+        headers["Origin"] = "https://fireboard.io"
+
+        # Include CSRF token if we have it
+        if self._csrf_token:
+            headers["X-CSRFToken"] = self._csrf_token
 
         try:
             async with async_timeout.timeout(API_TIMEOUT):
+                url = f"{self._base_url}/{endpoint}"
+                _LOGGER.debug(
+                    "Making %s request to %s with %d cookies",
+                    method,
+                    url,
+                    len(list(self._cookie_jar))
+                )
                 response = await self._session.request(
                     method,
-                    f"{self._base_url}/{endpoint}",
+                    url,
                     headers=headers,
                     **kwargs,
                 )
@@ -159,11 +191,13 @@ class FireBoardApiClient:
                     # Token expired, try to re-authenticate
                     _LOGGER.debug("Token expired, re-authenticating...")
                     await self.authenticate()
-                    # Retry the request with new token
+                    # Retry the request with new token and CSRF
                     headers["Authorization"] = f"Token {self._token}"
+                    if self._csrf_token:
+                        headers["X-CSRFToken"] = self._csrf_token
                     response = await self._session.request(
                         method,
-                        f"{self._base_url}/{endpoint}",
+                        url,
                         headers=headers,
                         **kwargs,
                     )
@@ -193,7 +227,7 @@ class FireBoardApiClient:
             FireBoardApiClientError: If request fails
 
         """
-        data = await self._request("GET", "v1/devices.json")
+        data = await self._request("GET", "devices.json")
         return data if isinstance(data, list) else []
 
     async def get_device(self, device_uuid: str) -> dict[str, Any]:
@@ -209,10 +243,19 @@ class FireBoardApiClient:
             FireBoardApiClientError: If request fails
 
         """
-        result = await self._request("GET", f"v1/devices/{device_uuid}.json")
+        result = await self._request("GET", f"devices/{device_uuid}.json")
         return result if isinstance(result, dict) else {}
 
     @property
     def auth_token(self) -> str | None:
         """Return the authentication token for MQTT connection."""
         return self._token
+
+    @property
+    def session_cookies(self) -> dict[str, str]:
+        """Return session cookies for MQTT WebSocket connection."""
+        cookies = {}
+        if self._cookie_jar:
+            for cookie in self._cookie_jar:
+                cookies[cookie.key] = cookie.value
+        return cookies

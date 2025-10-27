@@ -13,11 +13,11 @@ services:
       - TZ=America/Los_Angeles
     restart: unless-stopped
     privileged: true
-    network_mode: host
-    # Expose Home Assistant UI
-    # ports:
-    #   - "8123:8123"  # Not needed with network_mode: host
+    # Note: network_mode: host doesn't work on macOS Docker
+    # Using explicit port mapping instead
+    ports:
+      - "8123:8123"
 
-# For development, we're using host networking for simplicity
-# This allows HA to access your local network devices
+# For development on macOS, we use explicit port mapping
+# Home Assistant will be available at http://localhost:8123
 

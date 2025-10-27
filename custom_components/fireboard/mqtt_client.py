@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import ssl
@@ -19,17 +18,20 @@ class FireBoardMQTTClient:
     def __init__(
         self,
         auth_token: str,
+        session_cookies: dict[str, str],
         on_message_callback: Callable[[str, dict[str, Any]], None],
     ) -> None:
         """Initialize the MQTT client.
 
         Args:
             auth_token: FireBoard authentication token
+            session_cookies: Session cookies (sessionid and csrftoken)
             on_message_callback: Callback function for received messages
                                  Takes (device_uuid, message_data) as arguments
 
         """
         self._auth_token = auth_token
+        self._session_cookies = session_cookies
         self._on_message_callback = on_message_callback
         self._client: mqtt.Client | None = None
         self._connected = False
@@ -72,15 +74,17 @@ class FireBoardMQTTClient:
     ) -> None:
         """Handle incoming MQTT message."""
         try:
-            # Parse the topic to extract device UUID
-            # Topic format: fireboard/<device_uuid>/temps or similar
+            # Parse the topic to extract device UUID and message type
+            # Topic format: {device_uuid}/templog{channel} or {device_uuid}/drivelog
             topic_parts = msg.topic.split("/")
             if len(topic_parts) >= 2:
-                device_uuid = topic_parts[1]
+                device_uuid = topic_parts[0]
+                message_type = topic_parts[1]  # templog1, templog2, drivelog, etc.
             else:
-                device_uuid = "unknown"
+                _LOGGER.warning("Invalid topic format: %s", msg.topic)
+                return
 
-            # Parse message payload
+            # Parse message payload (JSON format)
             try:
                 payload = json.loads(msg.payload.decode("utf-8"))
             except (json.JSONDecodeError, UnicodeDecodeError):
@@ -88,8 +92,9 @@ class FireBoardMQTTClient:
                 return
 
             _LOGGER.debug(
-                "Received MQTT message for device %s: %s",
+                "Received MQTT message for device %s (%s): %s",
                 device_uuid,
+                message_type,
                 payload,
             )
 
@@ -104,9 +109,12 @@ class FireBoardMQTTClient:
         """Connect to FireBoard MQTT broker over WebSocket."""
         try:
             # Create MQTT client with WebSocket transport
+            # Use callback API version 1 for better WebSocket compatibility
             self._client = mqtt.Client(
-                client_id=f"ha-fireboard-{self._auth_token[:8]}",
+                client_id=f"fireboard_ha_{self._auth_token[:8]}",
                 transport="websockets",
+                protocol=mqtt.MQTTv31,  # Use MQTTv31 (not v311) to match mqttv3.1
+                callback_api_version=mqtt.CallbackAPIVersion.VERSION1,
             )
 
             # Set callbacks
@@ -114,11 +122,18 @@ class FireBoardMQTTClient:
             self._client.on_disconnect = self._on_disconnect
             self._client.on_message = self._on_message
 
-            # Configure WebSocket
+            # Build cookie header from session cookies
+            cookie_header = "; ".join([
+                f"{key}={value}"
+                for key, value in self._session_cookies.items()
+            ])
+
+            # Configure WebSocket with cookies and proper protocol
             self._client.ws_set_options(
                 path="/ws",
                 headers={
-                    "Authorization": f"Token {self._auth_token}",
+                    "Origin": "https://fireboard.io",
+                    "Cookie": cookie_header,
                 },
             )
 
@@ -126,7 +141,8 @@ class FireBoardMQTTClient:
             self._client.tls_set(cert_reqs=ssl.CERT_REQUIRED)
 
             # Connect to FireBoard MQTT broker
-            _LOGGER.info("Connecting to FireBoard MQTT broker...")
+            _LOGGER.info("Connecting to FireBoard MQTT broker with cookies...")
+            _LOGGER.debug("Cookie header: %s", cookie_header[:50] + "...")
             self._client.connect("fireboard.io", 443, keepalive=60)
 
             # Start the network loop in a background thread
@@ -146,32 +162,50 @@ class FireBoardMQTTClient:
             self._client.disconnect()
             self._connected = False
 
-    def subscribe_device(self, device_uuid: str) -> None:
+    def subscribe_device(self, device_uuid: str, channels: list[int]) -> None:
         """Subscribe to temperature updates for a specific device.
 
         Args:
             device_uuid: The device UUID to subscribe to
+            channels: List of channel numbers to subscribe to
 
         """
         if not self._client:
             _LOGGER.error("Cannot subscribe: MQTT client not connected")
             return
 
-        # Subscribe to device-specific topics
-        # FireBoard likely uses topics like: fireboard/<uuid>/temps
-        # We'll subscribe to a wildcard for the device
-        topic = f"fireboard/{device_uuid}/#"
+        # Subscribe to each channel's temperature topic
+        # Topic format: {device_uuid}/templog{channel}
+        for channel in channels:
+            topic = f"{device_uuid}/templog{channel}"
+            self._subscribed_topics.add(topic)
 
-        self._subscribed_topics.add(topic)
-
-        if self._connected:
-            result, _ = self._client.subscribe(topic)
-            if result == mqtt.MQTT_ERR_SUCCESS:
-                _LOGGER.info("Subscribed to device %s", device_uuid)
+            if self._connected:
+                result, _ = self._client.subscribe(topic)
+                if result == mqtt.MQTT_ERR_SUCCESS:
+                    _LOGGER.info(
+                        "Subscribed to device %s channel %d",
+                        device_uuid,
+                        channel
+                    )
+                else:
+                    _LOGGER.error(
+                        "Failed to subscribe to device %s channel %d",
+                        device_uuid,
+                        channel
+                    )
             else:
-                _LOGGER.error("Failed to subscribe to device %s", device_uuid)
-        else:
-            _LOGGER.debug("Device %s will be subscribed on connection", device_uuid)
+                _LOGGER.debug(
+                    "Device %s channel %d will be subscribed on connection",
+                    device_uuid,
+                    channel
+                )
+
+        # Also subscribe to drive log if needed
+        drive_topic = f"{device_uuid}/drivelog"
+        self._subscribed_topics.add(drive_topic)
+        if self._connected:
+            self._client.subscribe(drive_topic)
 
     def unsubscribe_device(self, device_uuid: str) -> None:
         """Unsubscribe from a device's updates.

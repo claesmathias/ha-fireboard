@@ -22,8 +22,8 @@ from .mqtt_client import FireBoardMQTTClient
 
 _LOGGER = logging.getLogger(__name__)
 
-# Refresh device list every 5 minutes (MQTT handles real-time temps)
-DEVICE_REFRESH_INTERVAL = timedelta(minutes=5)
+# Refresh device list and temperatures every 60 seconds (REST API polling)
+DEVICE_REFRESH_INTERVAL = timedelta(seconds=60)
 
 
 class FireBoardDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
@@ -63,9 +63,10 @@ class FireBoardDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             await self.client.authenticate()
 
             # Set up MQTT client for real-time updates
-            if self.client.auth_token:
+            if self.client.auth_token and self.client.session_cookies:
                 self.mqtt_client = FireBoardMQTTClient(
                     auth_token=self.client.auth_token,
+                    session_cookies=self.client.session_cookies,
                     on_message_callback=self._handle_mqtt_message,
                 )
 
@@ -74,11 +75,14 @@ class FireBoardDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
                 _LOGGER.info("MQTT client connected successfully")
             else:
-                _LOGGER.warning("No auth token available for MQTT connection")
+                _LOGGER.warning("No auth token or session cookies available for MQTT")
 
         except Exception as err:
-            _LOGGER.error("Failed to set up MQTT connection: %s", err)
+            _LOGGER.warning(
+                "MQTT connection unavailable, will use REST API polling: %s", err
+            )
             # Don't fail setup, we can fall back to polling
+            self.mqtt_client = None
 
     def _handle_mqtt_message(
         self, device_uuid: str, message_data: dict[str, Any]
@@ -88,18 +92,48 @@ class FireBoardDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         Args:
             device_uuid: The device UUID
             message_data: The message payload containing temperature data
+                         Format: {"temp": 67, "channel": 1, "p": true,
+                                 "date": "...", "degreetype": 2}
 
         """
         _LOGGER.debug("MQTT message for device %s: %s", device_uuid, message_data)
 
         # Update the coordinator's data with the new temperature info
         if self.data and device_uuid in self.data:
-            # Update temperatures from MQTT message
-            self.data[device_uuid]["temperatures"] = message_data
-            self.data[device_uuid]["online"] = True
+            # Initialize temperatures dict if not exists
+            if "temperatures" not in self.data[device_uuid]:
+                self.data[device_uuid]["temperatures"] = {"channels": []}
 
-            # Trigger update to sensors
-            self.async_set_updated_data(self.data)
+            # Update or add channel temperature
+            channel_num = message_data.get("channel")
+            if channel_num:
+                channels = self.data[device_uuid]["temperatures"].get(
+                    "channels", []
+                )
+
+                # Find and update existing channel or add new one
+                found = False
+                for ch in channels:
+                    if ch.get("channel") == channel_num:
+                        ch["current_temp"] = message_data.get("temp")
+                        ch["probe_present"] = message_data.get("p", False)
+                        ch["last_update"] = message_data.get("date")
+                        found = True
+                        break
+
+                if not found:
+                    channels.append({
+                        "channel": channel_num,
+                        "current_temp": message_data.get("temp"),
+                        "probe_present": message_data.get("p", False),
+                        "last_update": message_data.get("date"),
+                    })
+
+                self.data[device_uuid]["temperatures"]["channels"] = channels
+                self.data[device_uuid]["online"] = True
+
+                # Trigger update to sensors
+                self.async_set_updated_data(self.data)
         else:
             _LOGGER.debug("Received data for unknown device: %s", device_uuid)
 
@@ -155,11 +189,25 @@ class FireBoardDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
                 # Subscribe to MQTT for this device
                 if self.mqtt_client and device_uuid not in self._subscribed_devices:
-                    await self.hass.async_add_executor_job(
-                        self.mqtt_client.subscribe_device, device_uuid
-                    )
-                    self._subscribed_devices.add(device_uuid)
-                    _LOGGER.debug("Subscribed to MQTT for device %s", device_uuid)
+                    # Get list of channel numbers
+                    channel_numbers = [
+                        ch.get("channel")
+                        for ch in channels
+                        if ch.get("channel")
+                    ]
+
+                    if channel_numbers:
+                        await self.hass.async_add_executor_job(
+                            self.mqtt_client.subscribe_device,
+                            device_uuid,
+                            channel_numbers
+                        )
+                        self._subscribed_devices.add(device_uuid)
+                        _LOGGER.debug(
+                            "Subscribed to MQTT for device %s (channels: %s)",
+                            device_uuid,
+                            channel_numbers
+                        )
 
                 _LOGGER.debug(
                     "Updated data for device %s",

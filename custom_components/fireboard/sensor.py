@@ -37,10 +37,9 @@ async def async_setup_entry(
     # Create sensors for each device and channel
     for device_uuid, device_data in coordinator.data.items():
         device_info = device_data.get("device_info", {})
-        temperatures = device_data.get("temperatures", {})
 
-        # Get channels from temperature data
-        channels = temperatures.get("channels", [])
+        # Get channels from device info (REST API provides channel configuration)
+        channels = device_info.get("channels", [])
 
         for channel in channels:
             channel_number = channel.get("channel")
@@ -83,9 +82,15 @@ class FireBoardTemperatureSensor(FireBoardEntity, SensorEntity):
         """Initialize the temperature sensor."""
         super().__init__(coordinator, device_uuid, channel_number)
 
-        # Get channel info for naming
-        channel_info = self._get_channel_info()
-        channel_label = channel_info.get("label") or f"Channel {channel_number}"
+        # Get channel info for naming from device configuration
+        device_info = self._device_data.get("device_info", {})
+        channels = device_info.get("channels", [])
+        channel_label = f"Channel {channel_number}"
+
+        for channel in channels:
+            if channel.get("channel") == channel_number:
+                channel_label = channel.get("channel_label", channel_label)
+                break
 
         # Set unique ID
         self._attr_unique_id = f"{device_uuid}_temp_{channel_number}"
@@ -95,11 +100,30 @@ class FireBoardTemperatureSensor(FireBoardEntity, SensorEntity):
 
     def _get_channel_info(self) -> dict[str, Any]:
         """Get channel information from coordinator data."""
-        channels = self._temperatures.get("channels", [])
+        # Get channel configuration from device_info (REST API)
+        device_info = self._device_data.get("device_info", {})
+        channels = device_info.get("channels", [])
+
+        channel_info = {}
         for channel in channels:
             if channel.get("channel") == self._channel_number:
-                return channel
-        return {}
+                channel_info = {
+                    "label": channel.get(
+                        "channel_label",
+                        f"Channel {self._channel_number}"
+                    ),
+                    "channel": channel.get("channel"),
+                }
+                break
+
+        # Merge with temperature data from MQTT if available
+        temp_channels = self._temperatures.get("channels", [])
+        for temp_channel in temp_channels:
+            if temp_channel.get("channel") == self._channel_number:
+                channel_info.update(temp_channel)
+                break
+
+        return channel_info
 
     @property
     def native_value(self) -> float | None:
