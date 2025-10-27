@@ -8,7 +8,7 @@
   "dependencies": [],
   "documentation": "https://github.com/GarthDB/ha-fireboard",
   "integration_type": "hub",
-  "iot_class": "cloud_push",
+  "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/GarthDB/ha-fireboard/issues",
   "requirements": [
     "aiohttp>=3.8.0",
