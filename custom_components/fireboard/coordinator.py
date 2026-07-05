@@ -17,13 +17,10 @@ from .api_client import (
     FireBoardApiClientCommunicationError,
     FireBoardApiClientRateLimitError,
 )
-from .const import DOMAIN
+from .const import CONF_POLLING_INTERVAL, DEFAULT_POLLING_INTERVAL, DOMAIN
 from .mqtt_client import FireBoardMQTTClient
 
 _LOGGER = logging.getLogger(__name__)
-
-# Refresh device list and temperatures every 60 seconds (REST API polling)
-DEVICE_REFRESH_INTERVAL = timedelta(seconds=60)
 
 
 class FireBoardDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
@@ -47,13 +44,17 @@ class FireBoardDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             session=session,
         )
 
+        polling_interval = config_entry.data.get(
+            CONF_POLLING_INTERVAL, DEFAULT_POLLING_INTERVAL
+        )
+
         super().__init__(
             hass,
             _LOGGER,
             name=DOMAIN,
             # Only need to refresh device list periodically
             # MQTT handles real-time temperature updates
-            update_interval=DEVICE_REFRESH_INTERVAL,
+            update_interval=timedelta(seconds=polling_interval),
         )
 
     async def _async_setup(self) -> None:
@@ -107,9 +108,7 @@ class FireBoardDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # Update or add channel temperature
             channel_num = message_data.get("channel")
             if channel_num:
-                channels = self.data[device_uuid]["temperatures"].get(
-                    "channels", []
-                )
+                channels = self.data[device_uuid]["temperatures"].get("channels", [])
 
                 # Find and update existing channel or add new one
                 found = False
@@ -122,12 +121,14 @@ class FireBoardDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         break
 
                 if not found:
-                    channels.append({
-                        "channel": channel_num,
-                        "current_temp": message_data.get("temp"),
-                        "probe_present": message_data.get("p", False),
-                        "last_update": message_data.get("date"),
-                    })
+                    channels.append(
+                        {
+                            "channel": channel_num,
+                            "current_temp": message_data.get("temp"),
+                            "probe_present": message_data.get("p", False),
+                            "last_update": message_data.get("date"),
+                        }
+                    )
 
                 self.data[device_uuid]["temperatures"]["channels"] = channels
                 self.data[device_uuid]["online"] = True
@@ -191,22 +192,20 @@ class FireBoardDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 if self.mqtt_client and device_uuid not in self._subscribed_devices:
                     # Get list of channel numbers
                     channel_numbers = [
-                        ch.get("channel")
-                        for ch in channels
-                        if ch.get("channel")
+                        ch.get("channel") for ch in channels if ch.get("channel")
                     ]
 
                     if channel_numbers:
                         await self.hass.async_add_executor_job(
                             self.mqtt_client.subscribe_device,
                             device_uuid,
-                            channel_numbers
+                            channel_numbers,
                         )
                         self._subscribed_devices.add(device_uuid)
                         _LOGGER.debug(
                             "Subscribed to MQTT for device %s (channels: %s)",
                             device_uuid,
-                            channel_numbers
+                            channel_numbers,
                         )
 
                 _LOGGER.debug(

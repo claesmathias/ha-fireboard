@@ -13,13 +13,13 @@
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/GarthDB/ha-fireboard.git
+git clone https://github.com/claesmathias/ha-fireboard.git
 cd ha-fireboard
 ```
 
 2. Install development dependencies:
 ```bash
-pip install -r requirements-dev.txt
+pip install -e ".[dev]"
 ```
 
 3. Install pre-commit hooks (optional but recommended):
@@ -72,23 +72,14 @@ vulture custom_components/fireboard/ --min-confidence 80
 
 ### Testing with Home Assistant
 
-#### Method 1: Copy to Home Assistant config
+Copy or symlink the integration into a Home Assistant instance to test it
+end-to-end:
 
 ```bash
-# Create symbolic link to your Home Assistant config
 ln -s $(pwd)/custom_components/fireboard ~/.homeassistant/custom_components/fireboard
 
 # Restart Home Assistant
 ```
-
-#### Method 2: Development Container
-
-Use the included `.devcontainer` configuration with VS Code:
-
-1. Open project in VS Code
-2. Install "Remote - Containers" extension
-3. Click "Reopen in Container"
-4. Home Assistant will be available at http://localhost:8123
 
 ### Local CI Testing
 
@@ -123,15 +114,12 @@ ha-fireboard/
 │   └── strings.json             # Translations
 ├── tests/                        # Test suite
 │   ├── conftest.py              # Test fixtures
-│   ├── test_*.py                # Test files
-│   └── fixtures/                # Test data
+│   ├── mock_homeassistant.py    # Lightweight homeassistant package stand-in
+│   └── test_*.py                # Test files
 ├── .github/                      # GitHub configuration
 │   ├── workflows/               # CI/CD workflows
 │   └── ISSUE_TEMPLATE/          # Issue templates
-├── docs/                         # Documentation
-├── requirements-dev.txt          # Development dependencies
-├── requirements-test.txt         # Test dependencies
-├── pyproject.toml               # Project configuration
+├── pyproject.toml               # Project configuration and dependencies
 └── README.md                    # Main documentation
 ```
 
@@ -214,7 +202,7 @@ def test_<what>_<condition>_<expected_result>():
 
 ### Rate Limiting
 
-- Respect API rate limits (200 calls/hour)
+- Respect API rate limits (17 calls per 5-minute window)
 - Default polling interval: 40 seconds
 - Provide clear error messages when rate limited
 - Allow users to configure polling interval
@@ -295,20 +283,22 @@ logger:
 ## Release Process
 
 1. Update version in `manifest.json`
-2. Update `CHANGELOG.md`
-3. Commit changes: `git commit -m "Release vX.Y.Z"`
-4. Create tag: `git tag -a vX.Y.Z -m "Release vX.Y.Z"`
-5. Push: `git push && git push --tags`
-6. GitHub Actions will create release automatically
-7. Update HACS repository (if listed)
+2. Commit changes: `git commit -m "Release vX.Y.Z"`
+3. Create tag: `git tag -a vX.Y.Z -m "Release vX.Y.Z"`
+4. Push: `git push && git push --tags`
+5. GitHub Actions will create release automatically
+6. Update HACS repository (if listed)
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines.
+1. Fork the repository, create a feature branch
+2. Add tests for new functionality and ensure `pytest` passes
+3. Format and lint with `black`, `isort`, `flake8`
+4. Submit a pull request
 
 ## Getting Help
 
-- Check existing [Issues](https://github.com/GarthDB/ha-fireboard/issues)
-- Join [Discussions](https://github.com/GarthDB/ha-fireboard/discussions)
+- Check existing [Issues](https://github.com/claesmathias/ha-fireboard/issues)
+- Join [Discussions](https://github.com/claesmathias/ha-fireboard/discussions)
 - Ask on [Home Assistant Community](https://community.home-assistant.io/)
 

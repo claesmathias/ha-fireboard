@@ -9,13 +9,18 @@ The FireBoard integration uses a **hybrid REST + MQTT** approach for optimal per
 1. **REST API** (Session Cookie Authentication)
    - Initial authentication: `/api/rest-auth/login/`
    - Device list: `/api/v1/devices.json`
-   - Refreshes device list every 5 minutes
+   - Refreshes device list on the user-configured polling interval (default 40s)
 
 2. **MQTT over WebSocket** (Real-time Updates)
    - Endpoint: `wss://fireboard.io/ws`
    - Protocol: MQTT v3.1 over WebSocket
    - Provides real-time temperature updates
    - No polling needed!
+
+> **Note**: FireBoard's [official API docs](https://docs.fireboard.io/app/app-api/)
+> only describe REST polling — MQTT/WebSocket is undocumented, reverse-engineered
+> behavior and could change without notice. The coordinator falls back to REST
+> polling if the MQTT connection fails.
 
 ## User Experience
 
@@ -57,13 +62,16 @@ Authorization: Token {auth_token}
 Sec-WebSocket-Protocol: mqttv3.1
 ```
 
-### Topic Structure (Assumed)
+### Topic Structure
 
 ```
-fireboard/<device_uuid>/#
+<device_uuid>/templog<channel>   # one topic per temperature channel
+<device_uuid>/drivelog           # FireBoard Drive data, if present
 ```
 
-The integration subscribes to all topics for each device using a wildcard.
+The integration subscribes to each channel's topic individually rather than a
+wildcard, since the FireBoard broker does not expose a per-device wildcard
+topic.
 
 ### Data Flow
 
@@ -100,8 +108,8 @@ The integration subscribes to all topics for each device using a wildcard.
 | Aspect | REST Polling | MQTT Push |
 |--------|-------------|-----------|
 | **Latency** | 40 seconds | < 1 second |
-| **API Calls** | ~90/hour/device | ~12/day (device refresh) |
-| **Rate Limiting** | Risk with multiple devices | No risk |
+| **API Calls** | ~90/hour/device | Only for periodic device-list refresh |
+| **Rate Limiting** | Risk with multiple devices (17 calls/5min limit) | No risk |
 | **Battery Impact** | Higher (frequent polls) | Lower (push only) |
 | **Responsiveness** | Delayed | Instant |
 
@@ -110,7 +118,7 @@ The integration subscribes to all topics for each device using a wildcard.
 The integration is designed to gracefully handle MQTT connection issues:
 
 1. **MQTT Disconnects**: Auto-reconnect via paho-mqtt
-2. **MQTT Unavailable**: Device list still updates every 5 minutes via REST
+2. **MQTT Unavailable**: Device list still updates via REST on the configured polling interval
 3. **Authentication Expires**: Auto-reauthenticate and reconnect
 
 ## Testing the MQTT Connection
@@ -221,7 +229,7 @@ logger:
 
 ## References
 
-- [FireBoard Cloud API Docs](https://docs.fireboard.io/app/api.html)
+- [FireBoard Cloud API Docs](https://docs.fireboard.io/app/app-api/)
 - [Paho MQTT Python](https://github.com/eclipse/paho.mqtt.python)
 - [Home Assistant Integration Development](https://developers.home-assistant.io/)
 

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, patch
 
-import pytest
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import UnitOfTemperature
 
@@ -135,3 +134,93 @@ async def test_battery_sensor(hass, mock_coordinator_data, mock_config_entry_dat
 
         assert sensor.native_value == 85
         assert sensor.native_unit_of_measurement == "%"
+
+
+async def test_temperature_sensor_invalid_value_returns_none(
+    hass, mock_coordinator_data, mock_config_entry_data
+):
+    """Test an unparseable current_temp is treated as no reading, not a crash."""
+    from custom_components.fireboard.coordinator import FireBoardDataUpdateCoordinator
+    from custom_components.fireboard.sensor import FireBoardTemperatureSensor
+
+    config_entry = ConfigEntry(
+        domain=DOMAIN,
+        title="Test",
+        data=mock_config_entry_data,
+    )
+
+    mock_coordinator_data["test-device-uuid-123"]["temperatures"]["channels"][0][
+        "current_temp"
+    ] = "not-a-number"
+
+    with patch("custom_components.fireboard.coordinator.FireBoardApiClient"):
+        coordinator = FireBoardDataUpdateCoordinator(hass, config_entry)
+        coordinator.data = mock_coordinator_data
+        coordinator.last_update_success = True
+
+        sensor = FireBoardTemperatureSensor(
+            coordinator,
+            "test-device-uuid-123",
+            1,
+        )
+
+        assert sensor.native_value is None
+
+
+async def test_temperature_sensor_no_reading_yet(
+    hass, mock_coordinator_data, mock_config_entry_data
+):
+    """Test a channel with no current_temp reports no value or extra attrs."""
+    from custom_components.fireboard.coordinator import FireBoardDataUpdateCoordinator
+    from custom_components.fireboard.sensor import FireBoardTemperatureSensor
+
+    config_entry = ConfigEntry(
+        domain=DOMAIN,
+        title="Test",
+        data=mock_config_entry_data,
+    )
+
+    with patch("custom_components.fireboard.coordinator.FireBoardApiClient"):
+        coordinator = FireBoardDataUpdateCoordinator(hass, config_entry)
+        coordinator.data = mock_coordinator_data
+        coordinator.last_update_success = True
+
+        # Channel 3 in mock_temperature_data has current_temp=None, target_temp=None
+        sensor = FireBoardTemperatureSensor(
+            coordinator,
+            "test-device-uuid-123",
+            3,
+        )
+
+        assert sensor.native_value is None
+        assert "target_temp" not in sensor.extra_state_attributes
+
+
+async def test_battery_sensor_invalid_value_returns_none(
+    hass, mock_coordinator_data, mock_config_entry_data
+):
+    """Test an unparseable battery_level is treated as no reading, not a crash."""
+    from custom_components.fireboard.coordinator import FireBoardDataUpdateCoordinator
+    from custom_components.fireboard.sensor import FireBoardBatterySensor
+
+    config_entry = ConfigEntry(
+        domain=DOMAIN,
+        title="Test",
+        data=mock_config_entry_data,
+    )
+
+    mock_coordinator_data["test-device-uuid-123"]["device_info"][
+        "battery_level"
+    ] = "not-a-number"
+
+    with patch("custom_components.fireboard.coordinator.FireBoardApiClient"):
+        coordinator = FireBoardDataUpdateCoordinator(hass, config_entry)
+        coordinator.data = mock_coordinator_data
+        coordinator.last_update_success = True
+
+        sensor = FireBoardBatterySensor(
+            coordinator,
+            "test-device-uuid-123",
+        )
+
+        assert sensor.native_value is None

@@ -1,6 +1,6 @@
 # Home Assistant FireBoard Integration
 
-[![CI](https://github.com/GarthDB/ha-fireboard/workflows/CI/badge.svg)](https://github.com/GarthDB/ha-fireboard/actions)
+[![CI](https://github.com/claesmathias/ha-fireboard/workflows/CI/badge.svg)](https://github.com/claesmathias/ha-fireboard/actions)
 [![HACS](https://img.shields.io/badge/HACS-Default-orange.svg)](https://github.com/hacs/integration)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -76,7 +76,7 @@ While there is an existing [fireboard2mqtt integration](https://github.com/gordl
    - **Password**: Your FireBoard account password
    - **Polling Interval**: How often to update data (default: 40 seconds)
 
-**Note**: The minimum polling interval is 40 seconds to respect FireBoard's API rate limit of 200 calls per hour.
+**Note**: The minimum polling interval is 40 seconds to respect FireBoard's API rate limit of 17 calls per 5-minute window.
 
 ## Entities
 
@@ -234,8 +234,8 @@ automation:
 
 **Solution**:
 - Increase the polling interval in the integration configuration
-- Default is 40 seconds (90 calls/hour)
-- FireBoard allows 200 API calls per hour
+- Default is 40 seconds
+- FireBoard allows 17 API calls per 5-minute window
 - If you have multiple Home Assistant instances, they share the same limit
 
 ### Devices Not Showing Up
@@ -283,11 +283,11 @@ automation:
 
 ```bash
 # Clone the repository
-git clone https://github.com/GarthDB/ha-fireboard.git
+git clone https://github.com/claesmathias/ha-fireboard.git
 cd ha-fireboard
 
 # Install development dependencies
-pip install -r requirements-dev.txt
+pip install -e ".[dev]"
 
 # Run tests
 pytest tests/ --cov=custom_components/fireboard
@@ -296,9 +296,6 @@ pytest tests/ --cov=custom_components/fireboard
 black custom_components/fireboard tests/
 isort custom_components/fireboard tests/
 flake8 custom_components/fireboard tests/
-
-# Run all checks
-make check-all  # If using Makefile
 ```
 
 ### Project Structure
@@ -318,8 +315,7 @@ ha-fireboard/
 │       ├── manifest.json        # Integration metadata
 │       └── strings.json         # UI strings
 ├── tests/                       # Test suite
-├── .github/workflows/           # CI/CD
-└── docs/                        # Documentation
+└── .github/workflows/           # CI/CD
 ```
 
 ## Contributing
@@ -334,8 +330,8 @@ ha-fireboard/
 
 ## Support
 
-- **Issues**: [GitHub Issues](https://github.com/garthdb/ha-fireboard/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/garthdb/ha-fireboard/discussions)
+- **Issues**: [GitHub Issues](https://github.com/claesmathias/ha-fireboard/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/claesmathias/ha-fireboard/discussions)
 - **Home Assistant Community**: [Community Forum](https://community.home-assistant.io/)
 
 ## License
@@ -361,6 +357,6 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ---
 
-**Maintained by**: [@GarthDB](https://github.com/GarthDB)  
+**Maintained by**: [@claesmathias](https://github.com/claesmathias)  
 **License**: MIT
 

@@ -109,8 +109,7 @@ class FireBoardTemperatureSensor(FireBoardEntity, SensorEntity):
             if channel.get("channel") == self._channel_number:
                 channel_info = {
                     "label": channel.get(
-                        "channel_label",
-                        f"Channel {self._channel_number}"
+                        "channel_label", f"Channel {self._channel_number}"
                     ),
                     "channel": channel.get("channel"),
                 }
