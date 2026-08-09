@@ -11,7 +11,7 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import UnitOfTemperature
+from homeassistant.const import UnitOfElectricPotential, UnitOfTemperature
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
@@ -85,6 +85,8 @@ async def async_setup_entry(
         if device_info.get("last_drivelog"):
             entities.append(FireBoardDriveSetpointSensor(coordinator, device_uuid))
             entities.append(FireBoardDriveFanSensor(coordinator, device_uuid))
+            entities.append(FireBoardDriveModeSensor(coordinator, device_uuid))
+            entities.append(FireBoardDriveBatterySensor(coordinator, device_uuid))
 
         # Current/most recent cook session for this device.
         entities.append(FireBoardSessionSensor(coordinator, device_uuid))
@@ -365,3 +367,82 @@ class FireBoardSessionSensor(FireBoardEntity, SensorEntity):
             attributes["description"] = description
 
         return attributes
+
+
+class FireBoardDriveModeSensor(FireBoardEntity, SensorEntity):
+    """Representation of a FireBoard Drive's operating mode (Auto/Manual/Off).
+
+    Sourced from session detail rather than devices.json, since only session
+    detail reports FireBoard's own human-readable mode string -- devices.json
+    only exposes this as an undocumented raw integer with no published
+    mapping. Only refreshed on the (throttled) session-polling cycle, so this
+    can lag briefly behind an actual mode change made in the FireBoard app.
+    """
+
+    _attr_icon = "mdi:fan"
+
+    def __init__(
+        self,
+        coordinator: FireBoardDataUpdateCoordinator,
+        device_uuid: str,
+    ) -> None:
+        """Initialize the Drive mode sensor."""
+        super().__init__(coordinator, device_uuid)
+
+        self._attr_unique_id = f"{device_uuid}_drive_mode"
+        self._attr_name = f"{self._device_title} Drive Mode"
+
+    @property
+    def native_value(self) -> str:
+        """Return the Drive's mode, or "Unknown" if not yet fetched."""
+        drive_status = self._device_data.get("drive_status")
+        mode = drive_status.get("mode") if drive_status else None
+        return mode or "Unknown"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return the raw power_mode value alongside the mode."""
+        drive_status = self._device_data.get("drive_status")
+        if not drive_status or drive_status.get("power_mode") is None:
+            return {}
+        return {"power_mode": drive_status["power_mode"]}
+
+
+class FireBoardDriveBatterySensor(FireBoardEntity, SensorEntity):
+    """Representation of the FireBoard Drive unit's own battery voltage.
+
+    Distinct from the main device's battery percentage (last_battery_reading)
+    -- the Drive fan controller has its own separate battery.
+    """
+
+    _attr_device_class = SensorDeviceClass.VOLTAGE
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = UnitOfElectricPotential.VOLT
+
+    def __init__(
+        self,
+        coordinator: FireBoardDataUpdateCoordinator,
+        device_uuid: str,
+    ) -> None:
+        """Initialize the Drive battery voltage sensor."""
+        super().__init__(coordinator, device_uuid)
+
+        self._attr_unique_id = f"{device_uuid}_drive_battery_voltage"
+        self._attr_name = f"{self._device_title} Drive Battery Voltage"
+
+    @property
+    def native_value(self) -> float | None:
+        """Return the Drive's battery voltage."""
+        drivelog = self._device_data.get("device_info", {}).get("last_drivelog") or {}
+        vbatt = drivelog.get("vbatt")
+
+        if vbatt is not None:
+            try:
+                return round(float(vbatt), 2)
+            except (ValueError, TypeError):
+                _LOGGER.warning(
+                    "Invalid Drive battery voltage for %s: %s", self._attr_name, vbatt
+                )
+                return None
+
+        return None

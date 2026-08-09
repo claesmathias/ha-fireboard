@@ -544,6 +544,7 @@ async def test_async_update_data_fetches_sessions_on_first_refresh(
                 }
             ]
         )
+        mock_client.get_session = AsyncMock(return_value={})
         mock_client_class.return_value = mock_client
 
         coordinator = FireBoardDataUpdateCoordinator(hass, config_entry)
@@ -585,6 +586,7 @@ async def test_async_update_data_skips_sessions_between_polls(
         mock_client.auth_token = "test-token"
         mock_client.get_devices = AsyncMock(return_value=[mock_device_data])
         mock_client.get_sessions = AsyncMock(return_value=[known_session])
+        mock_client.get_session = AsyncMock(return_value={})
         mock_client_class.return_value = mock_client
 
         coordinator = FireBoardDataUpdateCoordinator(hass, config_entry)
@@ -630,3 +632,234 @@ async def test_async_update_data_session_fetch_failure_is_non_fatal(
 
         assert mock_device_data["uuid"] in result
         assert result[mock_device_data["uuid"]]["session"] is None
+
+
+async def test_async_update_data_session_detail_fetch_failure_is_non_fatal(
+    hass, mock_config_entry_data, mock_device_data
+):
+    """Test a failed session *detail* fetch doesn't fail the whole update."""
+    from custom_components.fireboard.api_client import FireBoardApiClientRateLimitError
+
+    config_entry = ConfigEntry(
+        domain="fireboard", title="Test", data=mock_config_entry_data
+    )
+
+    with patch(
+        "custom_components.fireboard.coordinator.FireBoardApiClient"
+    ) as mock_client_class:
+        mock_client = AsyncMock()
+        mock_client.auth_token = "test-token"
+        mock_client.get_devices = AsyncMock(return_value=[mock_device_data])
+        mock_client.get_sessions = AsyncMock(
+            return_value=[
+                {
+                    "id": 1,
+                    "device_ids": [mock_device_data["uuid"]],
+                    "start_time": "2026-08-09T12:00:00Z",
+                    "end_time": None,
+                }
+            ]
+        )
+        mock_client.get_session = AsyncMock(
+            side_effect=FireBoardApiClientRateLimitError("rate limited")
+        )
+        mock_client_class.return_value = mock_client
+
+        coordinator = FireBoardDataUpdateCoordinator(hass, config_entry)
+        coordinator.client = mock_client
+
+        result = await coordinator._async_update_data()
+
+        assert mock_device_data["uuid"] in result
+        assert result[mock_device_data["uuid"]]["session"]["id"] == 1
+        assert result[mock_device_data["uuid"]]["drive_status"] is None
+
+
+def test_extract_drive_status_returns_mode_and_lid_paused():
+    """Test drive status is pulled from the matching device's last_drivelog."""
+    session_detail = {
+        "devices": [
+            {
+                "uuid": "device-1",
+                "last_drivelog": {
+                    "modetype": "Auto",
+                    "powermode": "Heating",
+                    "lidpaused": True,
+                },
+            }
+        ]
+    }
+
+    result = FireBoardDataUpdateCoordinator._extract_drive_status(
+        session_detail, "device-1"
+    )
+
+    assert result == {
+        "mode": "Auto",
+        "power_mode": "Heating",
+        "lid_paused": True,
+    }
+
+
+def test_extract_drive_status_no_matching_device():
+    """Test a device not present in session detail yields None, not an error."""
+    session_detail = {"devices": [{"uuid": "some-other-device", "last_drivelog": {}}]}
+
+    result = FireBoardDataUpdateCoordinator._extract_drive_status(
+        session_detail, "device-1"
+    )
+
+    assert result is None
+
+
+def test_extract_drive_status_device_without_drivelog():
+    """Test a matching device with no last_drivelog yields None."""
+    session_detail = {"devices": [{"uuid": "device-1", "last_drivelog": None}]}
+
+    result = FireBoardDataUpdateCoordinator._extract_drive_status(
+        session_detail, "device-1"
+    )
+
+    assert result is None
+
+
+async def test_async_update_data_fetches_drive_status_via_session_detail(
+    hass, mock_config_entry_data, mock_device_data
+):
+    """Test _async_update_data fetches session detail and populates drive_status."""
+    config_entry = ConfigEntry(
+        domain="fireboard", title="Test", data=mock_config_entry_data
+    )
+
+    with patch(
+        "custom_components.fireboard.coordinator.FireBoardApiClient"
+    ) as mock_client_class:
+        mock_client = AsyncMock()
+        mock_client.auth_token = "test-token"
+        mock_client.get_devices = AsyncMock(return_value=[mock_device_data])
+        mock_client.get_sessions = AsyncMock(
+            return_value=[
+                {
+                    "id": 1,
+                    "device_ids": [mock_device_data["uuid"]],
+                    "start_time": "2026-08-09T12:00:00Z",
+                    "end_time": None,
+                }
+            ]
+        )
+        mock_client.get_session = AsyncMock(
+            return_value={
+                "devices": [
+                    {
+                        "uuid": mock_device_data["uuid"],
+                        "last_drivelog": {
+                            "modetype": "Off",
+                            "powermode": "N/A",
+                            "lidpaused": False,
+                        },
+                    }
+                ]
+            }
+        )
+        mock_client_class.return_value = mock_client
+
+        coordinator = FireBoardDataUpdateCoordinator(hass, config_entry)
+        coordinator.client = mock_client
+
+        result = await coordinator._async_update_data()
+
+        mock_client.get_session.assert_called_once_with(1)
+        assert result[mock_device_data["uuid"]]["drive_status"] == {
+            "mode": "Off",
+            "power_mode": "N/A",
+            "lid_paused": False,
+        }
+
+
+async def test_async_update_data_caps_session_detail_fetches_per_refresh(
+    hass, mock_config_entry_data
+):
+    """Test at most one *new* session detail is fetched per refresh cycle.
+
+    With several devices each on a different session, fetching every
+    session's detail in the same cycle could burst multiple extra API calls
+    at once. Devices whose session isn't reached this cycle should just fall
+    back to their previously known drive_status instead.
+    """
+    device_a = {"uuid": "device-a", "title": "A", "channels": []}
+    device_b = {"uuid": "device-b", "title": "B", "channels": []}
+
+    config_entry = ConfigEntry(
+        domain="fireboard", title="Test", data=mock_config_entry_data
+    )
+
+    with patch(
+        "custom_components.fireboard.coordinator.FireBoardApiClient"
+    ) as mock_client_class:
+        mock_client = AsyncMock()
+        mock_client.auth_token = "test-token"
+        mock_client.get_devices = AsyncMock(return_value=[device_a, device_b])
+        mock_client.get_sessions = AsyncMock(
+            return_value=[
+                {
+                    "id": 1,
+                    "device_ids": ["device-a"],
+                    "start_time": "2026-08-09T12:00:00Z",
+                    "end_time": None,
+                },
+                {
+                    "id": 2,
+                    "device_ids": ["device-b"],
+                    "start_time": "2026-08-09T12:00:00Z",
+                    "end_time": None,
+                },
+            ]
+        )
+        mock_client.get_session = AsyncMock(return_value={"devices": []})
+        mock_client_class.return_value = mock_client
+
+        coordinator = FireBoardDataUpdateCoordinator(hass, config_entry)
+        coordinator.client = mock_client
+
+        await coordinator._async_update_data()
+
+        # Two devices, two distinct sessions -- only one detail call allowed.
+        assert mock_client.get_session.call_count == 1
+
+
+async def test_async_update_data_reuses_cached_session_detail_across_devices(
+    hass, mock_config_entry_data
+):
+    """Test devices sharing one session only trigger a single detail fetch."""
+    device_a = {"uuid": "device-a", "title": "A", "channels": []}
+    device_b = {"uuid": "device-b", "title": "B", "channels": []}
+
+    config_entry = ConfigEntry(
+        domain="fireboard", title="Test", data=mock_config_entry_data
+    )
+
+    with patch(
+        "custom_components.fireboard.coordinator.FireBoardApiClient"
+    ) as mock_client_class:
+        mock_client = AsyncMock()
+        mock_client.auth_token = "test-token"
+        mock_client.get_devices = AsyncMock(return_value=[device_a, device_b])
+        mock_client.get_sessions = AsyncMock(
+            return_value=[
+                {
+                    "id": 1,
+                    "device_ids": ["device-a", "device-b"],
+                    "start_time": "2026-08-09T12:00:00Z",
+                    "end_time": None,
+                }
+            ]
+        )
+        mock_client.get_session = AsyncMock(return_value={"devices": []})
+        mock_client_class.return_value = mock_client
+
+        coordinator = FireBoardDataUpdateCoordinator(hass, config_entry)
+        coordinator.client = mock_client
+
+        await coordinator._async_update_data()
+
+        mock_client.get_session.assert_called_once_with(1)

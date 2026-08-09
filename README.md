@@ -100,6 +100,10 @@ While there is an existing [fireboard2mqtt integration](https://github.com/gordl
 - Only created for devices with a FireBoard Drive (fan controller) attached
 - **Drive Setpoint**: Target temperature, device class `temperature`, unit Celsius or Fahrenheit matching your account's configured unit
 - **Drive Fan**: Fan output percentage, unit %
+- **Drive Mode**: `Auto`, `Manual`, or `Off`, read directly from FireBoard's own labels (not guessed) — refreshed on the same slower cadence as session data
+- **Drive Battery Voltage**: The Drive unit's own battery voltage (separate from the main device's battery), unit V
+
+> **Note**: FireBoard's API is read-only — there is no way to *set* the Drive setpoint, mode, or any other value through this integration (or through FireBoard's documented API at all). Changes must be made in the FireBoard app.
 
 ### Session Sensor
 - One per device, showing the title of the current or most recently ended cook session (`"No Session"` if none exists yet)
@@ -109,6 +113,7 @@ While there is an existing [fireboard2mqtt integration](https://github.com/gordl
 ### Binary Sensors
 - **Connectivity**: Device online/offline status
 - **Battery Low**: Alert when battery below 20%
+- **Drive Lid Paused**: On when FireBoard Drive has paused its fan because it detected the lid open (Drive-equipped devices only)
 
 ## Dashboard Examples
 

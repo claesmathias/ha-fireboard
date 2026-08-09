@@ -54,6 +54,15 @@ async def async_setup_entry(
                 )
             )
 
+        # Drive lid-paused sensor, if this device has a Drive attached.
+        if device_info.get("last_drivelog"):
+            entities.append(
+                FireBoardDriveLidPausedSensor(
+                    coordinator,
+                    device_uuid,
+                )
+            )
+
     async_add_entities(entities)
 
 
@@ -130,3 +139,30 @@ class FireBoardBatteryLowSensor(FireBoardEntity, BinarySensorEntity):
                 return False
 
         return False
+
+
+class FireBoardDriveLidPausedSensor(FireBoardEntity, BinarySensorEntity):
+    """Representation of whether FireBoard Drive has paused for an open lid.
+
+    Sourced from session detail rather than devices.json, since only session
+    detail exposes "lidpaused" as a direct field. Only refreshed on the
+    (throttled) session-polling cycle, so this can lag briefly behind the
+    lid actually opening/closing.
+    """
+
+    def __init__(
+        self,
+        coordinator: FireBoardDataUpdateCoordinator,
+        device_uuid: str,
+    ) -> None:
+        """Initialize the Drive lid-paused sensor."""
+        super().__init__(coordinator, device_uuid)
+
+        self._attr_unique_id = f"{device_uuid}_drive_lid_paused"
+        self._attr_name = f"{self._device_title} Drive Lid Paused"
+
+    @property
+    def is_on(self) -> bool:
+        """Return true if the Drive fan is currently paused for an open lid."""
+        drive_status = self._device_data.get("drive_status")
+        return bool(drive_status and drive_status.get("lid_paused"))

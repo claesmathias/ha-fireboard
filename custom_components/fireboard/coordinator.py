@@ -171,6 +171,30 @@ class FireBoardDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         return max(device_sessions, key=lambda s: s.get("start_time") or "")
 
+    @staticmethod
+    def _extract_drive_status(
+        session_detail: dict[str, Any], device_uuid: str
+    ) -> dict[str, Any] | None:
+        """Pull a device's Drive mode/lid-paused state out of session detail.
+
+        Unlike devices.json's embedded last_drivelog (raw, undocumented
+        integer modetype/powermode), a session's detail endpoint reports
+        these as FireBoard's own human-readable strings (e.g. "Off"), which
+        is what makes exposing a reliable Drive Mode sensor possible at all.
+        """
+        for device in session_detail.get("devices", []):
+            if device.get("uuid") != device_uuid:
+                continue
+            drivelog = device.get("last_drivelog")
+            if not drivelog:
+                return None
+            return {
+                "mode": drivelog.get("modetype"),
+                "power_mode": drivelog.get("powermode"),
+                "lid_paused": drivelog.get("lidpaused"),
+            }
+        return None
+
     async def _async_update_data(self) -> dict[str, Any]:
         """Update device list via REST API.
 
@@ -215,6 +239,18 @@ class FireBoardDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     should_poll_sessions = False
             self._refresh_count += 1
 
+            # Session detail (needed for human-readable Drive mode/lid-paused
+            # state) is its own API call per session. Devices sharing a
+            # session are deduplicated via this cache, but on top of that,
+            # cap detail fetches to at most one *new* session per refresh --
+            # with several devices each on a different session, fetching all
+            # of their details in one cycle could burst several extra calls
+            # at once, which risks the 17-calls-per-5-minutes limit. Any
+            # session not reached this cycle just keeps its previous
+            # drive_status and gets picked up on a later cycle.
+            session_detail_cache: dict[int, dict[str, Any]] = {}
+            session_detail_fetches_remaining = 1
+
             # Build data structure with device info
             device_data = {}
 
@@ -225,9 +261,54 @@ class FireBoardDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
                 if should_poll_sessions:
                     session = self._pick_current_session(sessions, device_uuid)
+                    session_id = session.get("id") if session else None
+
+                    if (
+                        session_id is not None
+                        and session_id not in session_detail_cache
+                    ):
+                        if session_detail_fetches_remaining > 0:
+                            try:
+                                session_detail_cache[session_id] = (
+                                    await self.client.get_session(session_id)
+                                )
+                            except (
+                                FireBoardApiClientRateLimitError,
+                                FireBoardApiClientCommunicationError,
+                            ) as err:
+                                _LOGGER.warning(
+                                    "Could not fetch session %s detail: %s",
+                                    session_id,
+                                    err,
+                                )
+                                session_detail_cache[session_id] = {}
+                            session_detail_fetches_remaining -= 1
+                        else:
+                            session_detail_cache[session_id] = None
+
+                    detail = (
+                        session_detail_cache.get(session_id)
+                        if session_id is not None
+                        else None
+                    )
+                    if detail:
+                        drive_status = self._extract_drive_status(detail, device_uuid)
+                    else:
+                        # No session, or this cycle's fetch budget was
+                        # already spent on another device's session.
+                        drive_status = (
+                            self.data.get(device_uuid, {}).get("drive_status")
+                            if self.data
+                            else None
+                        )
                 else:
                     session = (
                         self.data.get(device_uuid, {}).get("session")
+                        if self.data
+                        else None
+                    )
+                    drive_status = (
+                        self.data.get(device_uuid, {}).get("drive_status")
                         if self.data
                         else None
                     )
@@ -270,6 +351,7 @@ class FireBoardDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     "latest_temps": latest_temps,
                     "temperatures": {"channels": rest_channels},
                     "session": session,
+                    "drive_status": drive_status,
                     "online": True,
                 }
 

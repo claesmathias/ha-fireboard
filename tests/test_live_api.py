@@ -224,3 +224,32 @@ async def test_live_drive_data_shape(live_client):
         f"driveper={drivelog['driveper']} outside expected 0.0-1.0 ratio range "
         "-- FireBoard may have changed this field's scale"
     )
+
+
+async def test_live_drive_mode_via_session_detail(live_client):
+    """Prove FireBoardDataUpdateCoordinator._extract_drive_status works live.
+
+    This is what makes the Drive Mode / Lid Paused sensors possible: session
+    detail reports FireBoard's own human-readable mode string, unlike
+    devices.json's undocumented raw integer.
+    """
+    from custom_components.fireboard.coordinator import FireBoardDataUpdateCoordinator
+
+    await live_client.authenticate()
+    devices = await live_client.get_devices()
+    if not devices or not devices[0].get("last_drivelog"):
+        pytest.skip("No Drive-equipped device on this account")
+
+    uuid = devices[0]["uuid"]
+    sessions = await live_client.get_sessions()
+    session = FireBoardDataUpdateCoordinator._pick_current_session(sessions, uuid)
+    if session is None:
+        pytest.skip("No session to fetch Drive mode detail from")
+
+    detail = await live_client.get_session(session["id"])
+    drive_status = FireBoardDataUpdateCoordinator._extract_drive_status(detail, uuid)
+
+    print(f"\ndrive_status: {drive_status}")
+    assert drive_status is not None
+    assert isinstance(drive_status["mode"], str)
+    assert "lid_paused" in drive_status

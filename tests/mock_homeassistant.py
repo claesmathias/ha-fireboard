@@ -350,6 +350,12 @@ class UnitOfTemperature:
     CELSIUS = "°C"
 
 
+class UnitOfElectricPotential:
+    """Mock UnitOfElectricPotential enum."""
+
+    VOLT = "V"
+
+
 class BinarySensorDeviceClass:
     """Mock BinarySensorDeviceClass enum."""
 
@@ -362,6 +368,7 @@ class SensorDeviceClass:
 
     TEMPERATURE = "temperature"
     BATTERY = "battery"
+    VOLTAGE = "voltage"
 
 
 class SensorStateClass:
@@ -416,6 +423,7 @@ homeassistant = MockModule(
     const=MockModule(
         Platform=Platform,
         UnitOfTemperature=UnitOfTemperature,
+        UnitOfElectricPotential=UnitOfElectricPotential,
         CONF_EMAIL=CONF_EMAIL,
         CONF_PASSWORD=CONF_PASSWORD,
     ),

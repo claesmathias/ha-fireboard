@@ -89,7 +89,7 @@ async def test_sensor_setup_creates_drive_sensors_when_drivelog_present(
     await async_setup_entry(hass, config_entry, add_entities)
 
     drive_sensors = [e for e in entities if "_drive_" in e.unique_id]
-    assert len(drive_sensors) == 2
+    assert len(drive_sensors) == 4  # setpoint, fan, mode, battery voltage
 
 
 async def test_temperature_sensor_value(
@@ -444,6 +444,115 @@ async def test_drive_sensors_return_none_without_a_drivelog(
 
         assert setpoint_sensor.native_value is None
         assert fan_sensor.native_value is None
+
+
+async def test_drive_mode_sensor_with_status(
+    hass, mock_coordinator_data, mock_config_entry_data
+):
+    """Test the Drive mode sensor surfaces the human-readable mode string."""
+    from custom_components.fireboard.coordinator import FireBoardDataUpdateCoordinator
+    from custom_components.fireboard.sensor import FireBoardDriveModeSensor
+
+    config_entry = ConfigEntry(
+        domain=DOMAIN,
+        title="Test",
+        data=mock_config_entry_data,
+    )
+
+    mock_coordinator_data["test-device-uuid-123"]["drive_status"] = {
+        "mode": "Auto",
+        "power_mode": "Heating",
+        "lid_paused": False,
+    }
+
+    with patch("custom_components.fireboard.coordinator.FireBoardApiClient"):
+        coordinator = FireBoardDataUpdateCoordinator(hass, config_entry)
+        coordinator.data = mock_coordinator_data
+        coordinator.last_update_success = True
+
+        sensor = FireBoardDriveModeSensor(coordinator, "test-device-uuid-123")
+
+        assert sensor.native_value == "Auto"
+        assert sensor.extra_state_attributes == {"power_mode": "Heating"}
+
+
+async def test_drive_mode_sensor_without_status(
+    hass, mock_coordinator_data, mock_config_entry_data
+):
+    """Test the Drive mode sensor falls back to "Unknown" before first fetch."""
+    from custom_components.fireboard.coordinator import FireBoardDataUpdateCoordinator
+    from custom_components.fireboard.sensor import FireBoardDriveModeSensor
+
+    config_entry = ConfigEntry(
+        domain=DOMAIN,
+        title="Test",
+        data=mock_config_entry_data,
+    )
+
+    with patch("custom_components.fireboard.coordinator.FireBoardApiClient"):
+        coordinator = FireBoardDataUpdateCoordinator(hass, config_entry)
+        coordinator.data = mock_coordinator_data
+        coordinator.last_update_success = True
+
+        sensor = FireBoardDriveModeSensor(coordinator, "test-device-uuid-123")
+
+        assert sensor.native_value == "Unknown"
+        assert sensor.extra_state_attributes == {}
+
+
+async def test_drive_battery_voltage_sensor(
+    hass, mock_coordinator_data, mock_config_entry_data
+):
+    """Test the Drive battery voltage sensor reads vbatt from last_drivelog."""
+    from custom_components.fireboard.coordinator import FireBoardDataUpdateCoordinator
+    from custom_components.fireboard.sensor import FireBoardDriveBatterySensor
+
+    config_entry = ConfigEntry(
+        domain=DOMAIN,
+        title="Test",
+        data=mock_config_entry_data,
+    )
+
+    mock_coordinator_data["test-device-uuid-123"]["device_info"]["last_drivelog"] = {
+        "vbatt": 4.220333999999995,
+    }
+
+    with patch("custom_components.fireboard.coordinator.FireBoardApiClient"):
+        coordinator = FireBoardDataUpdateCoordinator(hass, config_entry)
+        coordinator.data = mock_coordinator_data
+        coordinator.last_update_success = True
+
+        sensor = FireBoardDriveBatterySensor(coordinator, "test-device-uuid-123")
+
+        assert sensor.native_value == 4.22
+        assert sensor.native_unit_of_measurement == "V"
+
+
+async def test_drive_battery_voltage_sensor_invalid_value_returns_none(
+    hass, mock_coordinator_data, mock_config_entry_data
+):
+    """Test an unparseable vbatt is treated as no reading, not a crash."""
+    from custom_components.fireboard.coordinator import FireBoardDataUpdateCoordinator
+    from custom_components.fireboard.sensor import FireBoardDriveBatterySensor
+
+    config_entry = ConfigEntry(
+        domain=DOMAIN,
+        title="Test",
+        data=mock_config_entry_data,
+    )
+
+    mock_coordinator_data["test-device-uuid-123"]["device_info"]["last_drivelog"] = {
+        "vbatt": "not-a-number",
+    }
+
+    with patch("custom_components.fireboard.coordinator.FireBoardApiClient"):
+        coordinator = FireBoardDataUpdateCoordinator(hass, config_entry)
+        coordinator.data = mock_coordinator_data
+        coordinator.last_update_success = True
+
+        sensor = FireBoardDriveBatterySensor(coordinator, "test-device-uuid-123")
+
+        assert sensor.native_value is None
 
 
 async def test_session_sensor_with_active_session(

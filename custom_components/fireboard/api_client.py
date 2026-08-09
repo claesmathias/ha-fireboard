@@ -301,6 +301,28 @@ class FireBoardApiClient:
         data = await self._request("GET", "sessions.json")
         return data if isinstance(data, list) else []
 
+    async def get_session(self, session_id: int) -> dict[str, Any]:
+        """Get detail for a single cook session.
+
+        Unlike get_sessions(), this embeds each tied device's full current
+        state, including a "last_drivelog" with human-readable "modetype"/
+        "powermode" strings (sessions.json's device_ids-only entries and
+        devices.json's embedded last_drivelog report these as raw,
+        undocumented integers instead).
+
+        Args:
+            session_id: Session ID
+
+        Returns:
+            Session dictionary with an embedded "devices" list
+
+        Raises:
+            FireBoardApiClientError: If request fails
+
+        """
+        result = await self._request("GET", f"sessions/{session_id}.json")
+        return result if isinstance(result, dict) else {}
+
     @property
     def auth_token(self) -> str | None:
         """Return the authentication token for MQTT connection."""
