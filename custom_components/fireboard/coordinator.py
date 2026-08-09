@@ -22,6 +22,13 @@ from .mqtt_client import FireBoardMQTTClient
 
 _LOGGER = logging.getLogger(__name__)
 
+# sessions.json returns every session for the account in one call (not
+# filterable per-device), so it's cheap relative to devices.json, but every
+# extra call still eats into FireBoard's 17-calls-per-5-minutes limit. Poll
+# it on a slower cadence than temperature data, which changes far more
+# slowly than temperatures do.
+SESSION_POLL_EVERY_N_REFRESHES = 3
+
 
 class FireBoardDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     """Class to manage fetching data from FireBoard API and MQTT."""
@@ -35,6 +42,7 @@ class FireBoardDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.config_entry = config_entry
         self.mqtt_client: FireBoardMQTTClient | None = None
         self._subscribed_devices: set[str] = set()
+        self._refresh_count = 0
 
         # Create API client
         session = async_get_clientsession(hass)
@@ -138,6 +146,29 @@ class FireBoardDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         else:
             _LOGGER.debug("Received data for unknown device: %s", device_uuid)
 
+    @staticmethod
+    def _pick_current_session(
+        sessions: list[dict[str, Any]], device_uuid: str
+    ) -> dict[str, Any] | None:
+        """Pick the most relevant session for a device.
+
+        Prefers a session that's still ongoing (end_time is None); falls
+        back to the most recently started session for that device.
+        """
+        device_sessions = [
+            session
+            for session in sessions
+            if device_uuid in (session.get("device_ids") or [])
+        ]
+        if not device_sessions:
+            return None
+
+        ongoing = [s for s in device_sessions if s.get("end_time") is None]
+        if ongoing:
+            return max(ongoing, key=lambda s: s.get("start_time") or "")
+
+        return max(device_sessions, key=lambda s: s.get("start_time") or "")
+
     async def _async_update_data(self) -> dict[str, Any]:
         """Update device list via REST API.
 
@@ -163,6 +194,25 @@ class FireBoardDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # Get all devices from REST API
             devices = await self.client.get_devices()
 
+            # Sessions change far more slowly than temperatures, so only
+            # refetch them periodically to conserve API budget; a failure
+            # here shouldn't fail the whole update, since temperature data
+            # is the priority.
+            should_poll_sessions = (
+                self._refresh_count % SESSION_POLL_EVERY_N_REFRESHES == 0
+            )
+            sessions: list[dict[str, Any]] = []
+            if should_poll_sessions:
+                try:
+                    sessions = await self.client.get_sessions()
+                except (
+                    FireBoardApiClientRateLimitError,
+                    FireBoardApiClientCommunicationError,
+                ) as err:
+                    _LOGGER.warning("Could not refresh sessions this cycle: %s", err)
+                    should_poll_sessions = False
+            self._refresh_count += 1
+
             # Build data structure with device info
             device_data = {}
 
@@ -170,6 +220,15 @@ class FireBoardDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 device_uuid = device.get("uuid")
                 if not device_uuid:
                     continue
+
+                if should_poll_sessions:
+                    session = self._pick_current_session(sessions, device_uuid)
+                else:
+                    session = (
+                        self.data.get(device_uuid, {}).get("session")
+                        if self.data
+                        else None
+                    )
 
                 # Extract channel information and latest temps from device data
                 channels = device.get("channels", [])
@@ -202,6 +261,7 @@ class FireBoardDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     "channels": channels,
                     "latest_temps": latest_temps,
                     "temperatures": {"channels": rest_channels},
+                    "session": session,
                     "online": True,
                 }
 

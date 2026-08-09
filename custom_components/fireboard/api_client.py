@@ -286,6 +286,21 @@ class FireBoardApiClient:
         result = await self._request("GET", f"devices/{device_uuid}.json")
         return result if isinstance(result, dict) else {}
 
+    async def get_sessions(self) -> list[dict[str, Any]]:
+        """Get all cook sessions for the authenticated account.
+
+        Returns:
+            List of session dictionaries, each including a "device_ids" list
+            linking it to the devices it was recorded on. An ongoing session
+            has "end_time" set to None.
+
+        Raises:
+            FireBoardApiClientError: If request fails
+
+        """
+        data = await self._request("GET", "sessions.json")
+        return data if isinstance(data, list) else []
+
     @property
     def auth_token(self) -> str | None:
         """Return the authentication token for MQTT connection."""

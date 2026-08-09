@@ -15,7 +15,7 @@ from homeassistant.const import UnitOfTemperature
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DOMAIN
+from .const import ATTR_SESSION_ID, ATTR_SESSION_START, DOMAIN
 from .coordinator import FireBoardDataUpdateCoordinator
 from .entity import FireBoardEntity
 
@@ -64,6 +64,16 @@ async def async_setup_entry(
                     device_uuid,
                 )
             )
+
+        # FireBoard Drive (fan controller) sensors, if this device has one
+        # attached. devices.json embeds "last_drivelog" directly whenever a
+        # Drive has ever reported for the device.
+        if device_info.get("last_drivelog"):
+            entities.append(FireBoardDriveSetpointSensor(coordinator, device_uuid))
+            entities.append(FireBoardDriveFanSensor(coordinator, device_uuid))
+
+        # Current/most recent cook session for this device.
+        entities.append(FireBoardSessionSensor(coordinator, device_uuid))
 
     async_add_entities(entities)
 
@@ -211,3 +221,124 @@ class FireBoardBatterySensor(FireBoardEntity, SensorEntity):
                 return None
 
         return None
+
+
+class FireBoardDriveSetpointSensor(FireBoardEntity, SensorEntity):
+    """Representation of a FireBoard Drive's target temperature."""
+
+    _attr_device_class = SensorDeviceClass.TEMPERATURE
+    _attr_native_unit_of_measurement = UnitOfTemperature.FAHRENHEIT
+
+    def __init__(
+        self,
+        coordinator: FireBoardDataUpdateCoordinator,
+        device_uuid: str,
+    ) -> None:
+        """Initialize the Drive setpoint sensor."""
+        super().__init__(coordinator, device_uuid)
+
+        self._attr_unique_id = f"{device_uuid}_drive_setpoint"
+        self._attr_name = f"{self._device_title} Drive Setpoint"
+
+    @property
+    def native_value(self) -> float | None:
+        """Return the Drive's target temperature."""
+        drivelog = self._device_data.get("device_info", {}).get("last_drivelog") or {}
+        setpoint = drivelog.get("setpoint")
+
+        if setpoint is not None:
+            try:
+                return float(setpoint)
+            except (ValueError, TypeError):
+                _LOGGER.warning(
+                    "Invalid Drive setpoint for %s: %s", self._attr_name, setpoint
+                )
+                return None
+
+        return None
+
+
+class FireBoardDriveFanSensor(FireBoardEntity, SensorEntity):
+    """Representation of a FireBoard Drive's fan output."""
+
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = "%"
+
+    def __init__(
+        self,
+        coordinator: FireBoardDataUpdateCoordinator,
+        device_uuid: str,
+    ) -> None:
+        """Initialize the Drive fan sensor."""
+        super().__init__(coordinator, device_uuid)
+
+        self._attr_unique_id = f"{device_uuid}_drive_fan"
+        self._attr_name = f"{self._device_title} Drive Fan"
+
+    @property
+    def native_value(self) -> int | None:
+        """Return the Drive's fan output percentage.
+
+        FireBoard reports "driveper" as a 0.0-1.0 ratio rather than a
+        0-100 percentage.
+        """
+        drivelog = self._device_data.get("device_info", {}).get("last_drivelog") or {}
+        drive_percent = drivelog.get("driveper")
+
+        if drive_percent is not None:
+            try:
+                return round(float(drive_percent) * 100)
+            except (ValueError, TypeError):
+                _LOGGER.warning(
+                    "Invalid Drive fan reading for %s: %s",
+                    self._attr_name,
+                    drive_percent,
+                )
+                return None
+
+        return None
+
+
+class FireBoardSessionSensor(FireBoardEntity, SensorEntity):
+    """Representation of a FireBoard cook session."""
+
+    _attr_icon = "mdi:notebook-outline"
+
+    def __init__(
+        self,
+        coordinator: FireBoardDataUpdateCoordinator,
+        device_uuid: str,
+    ) -> None:
+        """Initialize the session sensor."""
+        super().__init__(coordinator, device_uuid)
+
+        self._attr_unique_id = f"{device_uuid}_session"
+        self._attr_name = f"{self._device_title} Session"
+
+    @property
+    def native_value(self) -> str:
+        """Return the session title, or a placeholder if none is known."""
+        session = self._device_data.get("session")
+        if not session:
+            return "No Session"
+        return session.get("title") or "No Session"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return additional session details."""
+        session = self._device_data.get("session")
+        if not session:
+            return {}
+
+        attributes = {
+            ATTR_SESSION_ID: session.get("id"),
+            ATTR_SESSION_START: session.get("start_time"),
+            "end_time": session.get("end_time"),
+            "duration": session.get("duration"),
+            "active": session.get("end_time") is None,
+        }
+        description = session.get("description")
+        if description:
+            attributes["description"] = description
+
+        return attributes

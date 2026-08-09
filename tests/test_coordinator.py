@@ -464,3 +464,169 @@ async def test_first_refresh_failure_raises_config_entry_not_ready(
 
         with pytest.raises(ConfigEntryNotReady):
             await coordinator.async_config_entry_first_refresh()
+
+
+def test_pick_current_session_prefers_ongoing_session():
+    """Test an ongoing session (end_time=None) wins over a finished one."""
+    sessions = [
+        {
+            "id": 1,
+            "device_ids": ["device-1"],
+            "start_time": "2026-08-01T00:00:00Z",
+            "end_time": "2026-08-01T05:00:00Z",
+        },
+        {
+            "id": 2,
+            "device_ids": ["device-1"],
+            "start_time": "2026-08-09T12:00:00Z",
+            "end_time": None,
+        },
+    ]
+
+    result = FireBoardDataUpdateCoordinator._pick_current_session(sessions, "device-1")
+
+    assert result["id"] == 2
+
+
+def test_pick_current_session_falls_back_to_most_recent_finished():
+    """Test the most recently started session wins when none are ongoing."""
+    sessions = [
+        {
+            "id": 1,
+            "device_ids": ["device-1"],
+            "start_time": "2026-08-01T00:00:00Z",
+            "end_time": "2026-08-01T05:00:00Z",
+        },
+        {
+            "id": 2,
+            "device_ids": ["device-1"],
+            "start_time": "2026-08-05T00:00:00Z",
+            "end_time": "2026-08-05T05:00:00Z",
+        },
+    ]
+
+    result = FireBoardDataUpdateCoordinator._pick_current_session(sessions, "device-1")
+
+    assert result["id"] == 2
+
+
+def test_pick_current_session_returns_none_without_a_match():
+    """Test a device with no matching sessions gets None, not an error."""
+    sessions = [{"id": 1, "device_ids": ["some-other-device"], "end_time": None}]
+
+    result = FireBoardDataUpdateCoordinator._pick_current_session(sessions, "device-1")
+
+    assert result is None
+
+
+async def test_async_update_data_fetches_sessions_on_first_refresh(
+    hass, mock_config_entry_data, mock_device_data
+):
+    """Test the very first refresh always fetches sessions."""
+    config_entry = ConfigEntry(
+        domain="fireboard", title="Test", data=mock_config_entry_data
+    )
+
+    with patch(
+        "custom_components.fireboard.coordinator.FireBoardApiClient"
+    ) as mock_client_class:
+        mock_client = AsyncMock()
+        mock_client.auth_token = "test-token"
+        mock_client.get_devices = AsyncMock(return_value=[mock_device_data])
+        mock_client.get_sessions = AsyncMock(
+            return_value=[
+                {
+                    "id": 1,
+                    "title": "Sun Cook",
+                    "device_ids": [mock_device_data["uuid"]],
+                    "start_time": "2026-08-09T12:00:00Z",
+                    "end_time": None,
+                }
+            ]
+        )
+        mock_client_class.return_value = mock_client
+
+        coordinator = FireBoardDataUpdateCoordinator(hass, config_entry)
+        coordinator.client = mock_client
+
+        result = await coordinator._async_update_data()
+
+        mock_client.get_sessions.assert_called_once()
+        assert result[mock_device_data["uuid"]]["session"]["id"] == 1
+
+
+async def test_async_update_data_skips_sessions_between_polls(
+    hass, mock_config_entry_data, mock_device_data
+):
+    """Test sessions are only refetched every SESSION_POLL_EVERY_N_REFRESHES.
+
+    Carries forward the previously known session on the skipped polls rather
+    than dropping it, since sessions change far more slowly than temperature.
+    """
+    from custom_components.fireboard.coordinator import (
+        SESSION_POLL_EVERY_N_REFRESHES,
+    )
+
+    config_entry = ConfigEntry(
+        domain="fireboard", title="Test", data=mock_config_entry_data
+    )
+    known_session = {
+        "id": 1,
+        "title": "Sun Cook",
+        "device_ids": [mock_device_data["uuid"]],
+        "start_time": "2026-08-09T12:00:00Z",
+        "end_time": None,
+    }
+
+    with patch(
+        "custom_components.fireboard.coordinator.FireBoardApiClient"
+    ) as mock_client_class:
+        mock_client = AsyncMock()
+        mock_client.auth_token = "test-token"
+        mock_client.get_devices = AsyncMock(return_value=[mock_device_data])
+        mock_client.get_sessions = AsyncMock(return_value=[known_session])
+        mock_client_class.return_value = mock_client
+
+        coordinator = FireBoardDataUpdateCoordinator(hass, config_entry)
+        coordinator.client = mock_client
+
+        assert SESSION_POLL_EVERY_N_REFRESHES > 1, "test assumes throttling is on"
+
+        # First refresh: fetches sessions.
+        coordinator.data = await coordinator._async_update_data()
+        assert mock_client.get_sessions.call_count == 1
+
+        # Next refresh: should be skipped, but the session must persist.
+        coordinator.data = await coordinator._async_update_data()
+        assert mock_client.get_sessions.call_count == 1
+        assert coordinator.data[mock_device_data["uuid"]]["session"]["id"] == 1
+
+
+async def test_async_update_data_session_fetch_failure_is_non_fatal(
+    hass, mock_config_entry_data, mock_device_data
+):
+    """Test a rate-limited/failed session fetch doesn't fail the whole update."""
+    from custom_components.fireboard.api_client import FireBoardApiClientRateLimitError
+
+    config_entry = ConfigEntry(
+        domain="fireboard", title="Test", data=mock_config_entry_data
+    )
+
+    with patch(
+        "custom_components.fireboard.coordinator.FireBoardApiClient"
+    ) as mock_client_class:
+        mock_client = AsyncMock()
+        mock_client.auth_token = "test-token"
+        mock_client.get_devices = AsyncMock(return_value=[mock_device_data])
+        mock_client.get_sessions = AsyncMock(
+            side_effect=FireBoardApiClientRateLimitError("rate limited")
+        )
+        mock_client_class.return_value = mock_client
+
+        coordinator = FireBoardDataUpdateCoordinator(hass, config_entry)
+        coordinator.client = mock_client
+
+        result = await coordinator._async_update_data()
+
+        assert mock_device_data["uuid"] in result
+        assert result[mock_device_data["uuid"]]["session"] is None

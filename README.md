@@ -94,6 +94,16 @@ While there is an existing [fireboard2mqtt integration](https://github.com/gordl
 - Device class: `battery`
 - Unit: Percent (%)
 
+### FireBoard Drive Sensors
+- Only created for devices with a FireBoard Drive (fan controller) attached
+- **Drive Setpoint**: Target temperature, device class `temperature`, unit °F
+- **Drive Fan**: Fan output percentage, unit %
+
+### Session Sensor
+- One per device, showing the title of the current or most recently ended cook session (`"No Session"` if none exists yet)
+- Attributes: `session_id`, `start_time`, `end_time`, `duration`, `active`, `description`
+- Refreshed on a slower cadence than temperature data (every 3rd poll) to conserve API rate limit budget
+
 ### Binary Sensors
 - **Connectivity**: Device online/offline status
 - **Battery Low**: Alert when battery below 20%

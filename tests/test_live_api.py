@@ -174,3 +174,53 @@ async def test_live_sensor_values_populate_from_rest_alone(live_client):
         "No channel had a current_temp from the REST response -- either no "
         "probe is currently reporting, or the parsing logic is wrong"
     )
+
+
+async def test_live_sessions_match_devices(live_client):
+    """Fetch real sessions and confirm coordinator._pick_current_session works.
+
+    Uses the coordinator's own picking logic against real data rather than
+    duplicating it, so this actually exercises the shipped code.
+    """
+    from custom_components.fireboard.coordinator import FireBoardDataUpdateCoordinator
+
+    await live_client.authenticate()
+    devices = await live_client.get_devices()
+    if not devices:
+        pytest.skip("No devices on this account to match sessions against")
+
+    sessions = await live_client.get_sessions()
+    print(f"\nFound {len(sessions)} session(s) on this account")
+
+    uuid = devices[0]["uuid"]
+    current = FireBoardDataUpdateCoordinator._pick_current_session(sessions, uuid)
+
+    print(f"Current session for {uuid}: {current}")
+    assert current is not None, "Expected at least one session for this device"
+    assert current["id"] in [s["id"] for s in sessions]
+
+
+async def test_live_drive_data_shape(live_client):
+    """If this device has FireBoard Drive data, sanity-check its field shape.
+
+    Confirms the setpoint/driveper fields the sensors rely on are still
+    present and numeric -- this is undocumented, embedded data (not a
+    documented endpoint response), so it's the kind of thing that could
+    silently change shape.
+    """
+    await live_client.authenticate()
+    devices = await live_client.get_devices()
+    if not devices:
+        pytest.skip("No devices on this account to check Drive data for")
+
+    drivelog = devices[0].get("last_drivelog")
+    if not drivelog:
+        pytest.skip("This device has no last_drivelog (no Drive attached)")
+
+    print(f"\nlast_drivelog: {drivelog}")
+    assert isinstance(drivelog.get("setpoint"), (int, float))
+    assert isinstance(drivelog.get("driveper"), (int, float))
+    assert 0.0 <= drivelog["driveper"] <= 1.0, (
+        f"driveper={drivelog['driveper']} outside expected 0.0-1.0 ratio range "
+        "-- FireBoard may have changed this field's scale"
+    )

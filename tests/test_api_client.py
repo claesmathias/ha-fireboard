@@ -179,6 +179,36 @@ async def test_get_device():
     assert called_url.endswith("devices/device-1.json")
 
 
+@pytest.mark.asyncio
+async def test_get_sessions():
+    """Test getting the account's cook sessions."""
+    session = MagicMock(spec=aiohttp.ClientSession)
+
+    auth_response = MagicMock()
+    auth_response.status = 200
+    auth_response.json = AsyncMock(return_value={"key": "test-token"})
+    auth_response.raise_for_status = MagicMock()
+    session.post = AsyncMock(return_value=auth_response)
+    session.cookie_jar = MagicMock()
+
+    sessions_response = MagicMock()
+    sessions_response.status = 200
+    sessions_response.json = AsyncMock(
+        return_value=[{"id": 1, "title": "Sun Cook", "device_ids": ["device-1"]}]
+    )
+    sessions_response.raise_for_status = MagicMock()
+    session.request = AsyncMock(return_value=sessions_response)
+
+    client = FireBoardApiClient("test@example.com", "password", session)
+    await client.authenticate()
+
+    sessions = await client.get_sessions()
+
+    assert sessions == [{"id": 1, "title": "Sun Cook", "device_ids": ["device-1"]}]
+    called_url = session.request.call_args.args[1]
+    assert called_url.endswith("sessions.json")
+
+
 async def test_authenticate_no_token_in_response():
     """Test authentication fails cleanly when the response has no token."""
     session = MagicMock(spec=aiohttp.ClientSession)
