@@ -123,6 +123,44 @@ async def test_temperature_sensor_value(
         assert sensor.extra_state_attributes["target_temp"] == 225.0
 
 
+async def test_temperature_sensor_uses_celsius_when_degreetype_is_1(
+    hass, mock_coordinator_data, mock_config_entry_data
+):
+    """Test the sensor reports Celsius when FireBoard's degreetype says so.
+
+    Regression test: the account/device's configured unit was previously
+    ignored and every temperature sensor was hardcoded to Fahrenheit, which
+    mislabeled Celsius readings (e.g. a 140 setpoint showing as "140 F"
+    instead of the correct "140 C").
+    """
+    from custom_components.fireboard.coordinator import FireBoardDataUpdateCoordinator
+    from custom_components.fireboard.sensor import FireBoardTemperatureSensor
+
+    config_entry = ConfigEntry(
+        domain=DOMAIN,
+        title="Test",
+        data=mock_config_entry_data,
+    )
+
+    mock_coordinator_data["test-device-uuid-123"]["temperatures"]["channels"][0][
+        "degreetype"
+    ] = 1
+
+    with patch("custom_components.fireboard.coordinator.FireBoardApiClient"):
+        coordinator = FireBoardDataUpdateCoordinator(hass, config_entry)
+        coordinator.data = mock_coordinator_data
+        coordinator.last_update_success = True
+
+        sensor = FireBoardTemperatureSensor(
+            coordinator,
+            "test-device-uuid-123",
+            1,
+        )
+
+        assert sensor.native_value == 225.5
+        assert sensor.native_unit_of_measurement == UnitOfTemperature.CELSIUS
+
+
 async def test_temperature_sensor_unavailable(
     hass, mock_coordinator_data, mock_config_entry_data
 ):
@@ -300,7 +338,47 @@ async def test_drive_setpoint_and_fan_sensors(
         fan_sensor = FireBoardDriveFanSensor(coordinator, "test-device-uuid-123")
 
         assert setpoint_sensor.native_value == 225.0
+        assert (
+            setpoint_sensor.native_unit_of_measurement == UnitOfTemperature.FAHRENHEIT
+        )
         assert fan_sensor.native_value == 42
+
+
+async def test_drive_setpoint_uses_celsius_when_degreetype_is_1(
+    hass, mock_coordinator_data, mock_config_entry_data
+):
+    """Test the Drive setpoint reports Celsius when FireBoard's degreetype says so.
+
+    Regression test: this previously always showed as Fahrenheit even when
+    the account was configured for Celsius (e.g. a 140 setpoint showing as
+    "140 F" instead of the correct "140 C").
+    """
+    from custom_components.fireboard.coordinator import FireBoardDataUpdateCoordinator
+    from custom_components.fireboard.sensor import FireBoardDriveSetpointSensor
+
+    config_entry = ConfigEntry(
+        domain=DOMAIN,
+        title="Test",
+        data=mock_config_entry_data,
+    )
+
+    mock_coordinator_data["test-device-uuid-123"]["device_info"]["last_drivelog"] = {
+        "setpoint": 140.0,
+        "driveper": 0.0,
+        "degreetype": 1,
+    }
+
+    with patch("custom_components.fireboard.coordinator.FireBoardApiClient"):
+        coordinator = FireBoardDataUpdateCoordinator(hass, config_entry)
+        coordinator.data = mock_coordinator_data
+        coordinator.last_update_success = True
+
+        setpoint_sensor = FireBoardDriveSetpointSensor(
+            coordinator, "test-device-uuid-123"
+        )
+
+        assert setpoint_sensor.native_value == 140.0
+        assert setpoint_sensor.native_unit_of_measurement == UnitOfTemperature.CELSIUS
 
 
 async def test_drive_sensors_invalid_values_return_none(

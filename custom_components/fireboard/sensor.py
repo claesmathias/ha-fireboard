@@ -22,6 +22,20 @@ from .entity import FireBoardEntity
 _LOGGER = logging.getLogger(__name__)
 
 
+def _unit_from_degreetype(degreetype: Any) -> str:
+    """Map FireBoard's "degreetype" field to a Home Assistant temperature unit.
+
+    FireBoard reports temperatures in whatever unit the account is actually
+    configured for (visible per-reading as "degreetype": 1 = Celsius,
+    2 = Fahrenheit) -- it must not be assumed to always be Fahrenheit.
+    Defaults to Fahrenheit, FireBoard's own default, if degreetype is
+    missing.
+    """
+    if degreetype == 1:
+        return UnitOfTemperature.CELSIUS
+    return UnitOfTemperature.FAHRENHEIT
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     config_entry: ConfigEntry,
@@ -83,7 +97,6 @@ class FireBoardTemperatureSensor(FireBoardEntity, SensorEntity):
 
     _attr_device_class = SensorDeviceClass.TEMPERATURE
     _attr_state_class = SensorStateClass.MEASUREMENT
-    _attr_native_unit_of_measurement = UnitOfTemperature.FAHRENHEIT
 
     def __init__(
         self,
@@ -135,6 +148,11 @@ class FireBoardTemperatureSensor(FireBoardEntity, SensorEntity):
                 break
 
         return channel_info
+
+    @property
+    def native_unit_of_measurement(self) -> str:
+        """Return the unit this channel's readings are actually reported in."""
+        return _unit_from_degreetype(self._get_channel_info().get("degreetype"))
 
     @property
     def native_value(self) -> float | None:
@@ -227,7 +245,6 @@ class FireBoardDriveSetpointSensor(FireBoardEntity, SensorEntity):
     """Representation of a FireBoard Drive's target temperature."""
 
     _attr_device_class = SensorDeviceClass.TEMPERATURE
-    _attr_native_unit_of_measurement = UnitOfTemperature.FAHRENHEIT
 
     def __init__(
         self,
@@ -239,6 +256,12 @@ class FireBoardDriveSetpointSensor(FireBoardEntity, SensorEntity):
 
         self._attr_unique_id = f"{device_uuid}_drive_setpoint"
         self._attr_name = f"{self._device_title} Drive Setpoint"
+
+    @property
+    def native_unit_of_measurement(self) -> str:
+        """Return the unit the Drive setpoint is actually reported in."""
+        drivelog = self._device_data.get("device_info", {}).get("last_drivelog") or {}
+        return _unit_from_degreetype(drivelog.get("degreetype"))
 
     @property
     def native_value(self) -> float | None:

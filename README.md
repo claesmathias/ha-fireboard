@@ -83,7 +83,9 @@ While there is an existing [fireboard2mqtt integration](https://github.com/gordl
 ### Temperature Sensors
 - One sensor per temperature channel (typically 6 per device)
 - Device class: `temperature`
-- Unit: Fahrenheit (°F)
+- Unit: Celsius or Fahrenheit, matching whatever your FireBoard account is
+  configured for (read per-reading from FireBoard's `degreetype` field, not
+  assumed)
 - Attributes:
   - `channel`: Channel number (1-6)
   - `label`: Custom channel label from FireBoard app
@@ -96,7 +98,7 @@ While there is an existing [fireboard2mqtt integration](https://github.com/gordl
 
 ### FireBoard Drive Sensors
 - Only created for devices with a FireBoard Drive (fan controller) attached
-- **Drive Setpoint**: Target temperature, device class `temperature`, unit °F
+- **Drive Setpoint**: Target temperature, device class `temperature`, unit Celsius or Fahrenheit matching your account's configured unit
 - **Drive Fan**: Fan output percentage, unit %
 
 ### Session Sensor

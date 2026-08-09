@@ -125,6 +125,7 @@ class FireBoardDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         ch["current_temp"] = message_data.get("temp")
                         ch["probe_present"] = message_data.get("p", False)
                         ch["last_update"] = message_data.get("date")
+                        ch["degreetype"] = message_data.get("degreetype")
                         found = True
                         break
 
@@ -135,6 +136,7 @@ class FireBoardDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                             "current_temp": message_data.get("temp"),
                             "probe_present": message_data.get("p", False),
                             "last_update": message_data.get("date"),
+                            "degreetype": message_data.get("degreetype"),
                         }
                     )
 
@@ -253,6 +255,12 @@ class FireBoardDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                             "current_temp": current_temp,
                             "probe_present": current_temp is not None,
                             "last_update": last_templog.get("created"),
+                            # 1 = Celsius, 2 = Fahrenheit -- this reflects the
+                            # unit the account/device is actually configured
+                            # for, and must not be assumed to always be °F.
+                            "degreetype": channel.get(
+                                "degreetype", last_templog.get("degreetype")
+                            ),
                         }
                     )
 
