@@ -31,10 +31,10 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/claesmathias/ha-fireboard"
-Repository = "https://github.com/claesmathias/ha-fireboard.git"
-Issues = "https://github.com/claesmathias/ha-fireboard/issues"
-Documentation = "https://github.com/claesmathias/ha-fireboard#readme"
+Homepage = "https://github.com/GarthDB/ha-fireboard"
+Repository = "https://github.com/GarthDB/ha-fireboard.git"
+Issues = "https://github.com/GarthDB/ha-fireboard/issues"
+Documentation = "https://github.com/GarthDB/ha-fireboard#readme"
 
 [project.optional-dependencies]
 dev = [

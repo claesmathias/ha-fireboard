@@ -18,8 +18,8 @@ We take the security of our integration seriously. If you believe you have found
 
 Instead, please report them via one of the following methods:
 
-1. **Email**: Send details to claesmathias@gmail.com
-2. **GitHub Security Advisory**: Use the [Security Advisory](https://github.com/claesmathias/ha-fireboard/security/advisories/new) feature
+1. **Email**: Send details to garthdb@gmail.com
+2. **GitHub Security Advisory**: Use the [Security Advisory](https://github.com/GarthDB/ha-fireboard/security/advisories/new) feature
 
 ### What to Include
 
@@ -111,8 +111,8 @@ To receive security updates:
 ## Contact
 
 For security concerns, contact:
-- **Email**: claesmathias@gmail.com
-- **GitHub**: [@claesmathias](https://github.com/claesmathias)
+- **Email**: garthdb@gmail.com
+- **GitHub**: [@GarthDB](https://github.com/GarthDB)
 
 ## Acknowledgments
 

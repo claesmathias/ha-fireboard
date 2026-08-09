@@ -13,7 +13,7 @@
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/claesmathias/ha-fireboard.git
+git clone https://github.com/GarthDB/ha-fireboard.git
 cd ha-fireboard
 ```
 
@@ -314,7 +314,7 @@ logger:
 
 ## Getting Help
 
-- Check existing [Issues](https://github.com/claesmathias/ha-fireboard/issues)
-- Join [Discussions](https://github.com/claesmathias/ha-fireboard/discussions)
+- Check existing [Issues](https://github.com/GarthDB/ha-fireboard/issues)
+- Join [Discussions](https://github.com/GarthDB/ha-fireboard/discussions)
 - Ask on [Home Assistant Community](https://community.home-assistant.io/)
 

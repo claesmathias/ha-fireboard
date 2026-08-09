@@ -1,6 +1,6 @@
 # Home Assistant FireBoard Integration
 
-[![CI](https://github.com/claesmathias/ha-fireboard/workflows/CI/badge.svg)](https://github.com/claesmathias/ha-fireboard/actions)
+[![CI](https://github.com/GarthDB/ha-fireboard/workflows/CI/badge.svg)](https://github.com/GarthDB/ha-fireboard/actions)
 [![HACS](https://img.shields.io/badge/HACS-Default-orange.svg)](https://github.com/hacs/integration)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -300,7 +300,7 @@ automation:
 
 ```bash
 # Clone the repository
-git clone https://github.com/claesmathias/ha-fireboard.git
+git clone https://github.com/GarthDB/ha-fireboard.git
 cd ha-fireboard
 
 # Install development dependencies
@@ -347,8 +347,8 @@ ha-fireboard/
 
 ## Support
 
-- **Issues**: [GitHub Issues](https://github.com/claesmathias/ha-fireboard/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/claesmathias/ha-fireboard/discussions)
+- **Issues**: [GitHub Issues](https://github.com/GarthDB/ha-fireboard/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/GarthDB/ha-fireboard/discussions)
 - **Home Assistant Community**: [Community Forum](https://community.home-assistant.io/)
 
 ## License
@@ -374,6 +374,6 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ---
 
-**Maintained by**: [@claesmathias](https://github.com/claesmathias)  
+**Maintained by**: [@GarthDB](https://github.com/GarthDB)  
 **License**: MIT
 
