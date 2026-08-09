@@ -99,9 +99,8 @@ def mock_device_data():
         "title": "Test FireBoard",
         "hardware_id": "FireBoard 2 Pro",
         "model": "FB2",
-        "software_version": "1.0.0",
-        "has_battery": True,
-        "battery_level": 85,
+        "version": "1.0.0",
+        "last_battery_reading": 0.85,  # FireBoard reports a 0.0-1.0 ratio
         "channels": [
             {"channel": 1, "channel_label": "Probe 1"},
             {"channel": 2, "channel_label": "Probe 2"},

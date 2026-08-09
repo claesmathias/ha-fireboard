@@ -43,8 +43,10 @@ async def async_setup_entry(
             )
         )
 
-        # Battery low sensor (if device has battery)
-        if device_info.get("has_battery", False):
+        # Battery low sensor (if the device reports a battery reading).
+        # Note: FireBoard's devices.json has no "has_battery" field -- every
+        # device we've observed reports "last_battery_reading" directly.
+        if device_info.get("last_battery_reading") is not None:
             entities.append(
                 FireBoardBatteryLowSensor(
                     coordinator,
@@ -107,19 +109,23 @@ class FireBoardBatteryLowSensor(FireBoardEntity, BinarySensorEntity):
 
     @property
     def is_on(self) -> bool:
-        """Return true if battery is low."""
-        device_info = self._device_data.get("device_info", {})
-        battery_level = device_info.get("battery_level")
+        """Return true if battery is low.
 
-        if battery_level is not None:
+        FireBoard reports "last_battery_reading" as a 0.0-1.0 ratio rather
+        than a 0-100 percentage.
+        """
+        device_info = self._device_data.get("device_info", {})
+        battery_reading = device_info.get("last_battery_reading")
+
+        if battery_reading is not None:
             try:
                 # Consider battery low if below 20%
-                return int(battery_level) < 20
+                return float(battery_reading) * 100 < 20
             except (ValueError, TypeError):
                 _LOGGER.warning(
-                    "Invalid battery level for %s: %s",
+                    "Invalid battery reading for %s: %s",
                     self._attr_name,
-                    battery_level,
+                    battery_reading,
                 )
                 return False
 

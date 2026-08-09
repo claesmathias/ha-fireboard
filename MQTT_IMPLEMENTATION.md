@@ -17,10 +17,24 @@ The FireBoard integration uses a **hybrid REST + MQTT** approach for optimal per
    - Provides real-time temperature updates
    - No polling needed!
 
-> **Note**: FireBoard's [official API docs](https://docs.fireboard.io/app/app-api/)
-> only describe REST polling — MQTT/WebSocket is undocumented, reverse-engineered
-> behavior and could change without notice. The coordinator falls back to REST
-> polling if the MQTT connection fails.
+> **Status (as of 2026-08-09)**: MQTT is currently broken. FireBoard's
+> [official API docs](https://docs.fireboard.io/app/app-api/) only describe
+> REST polling — MQTT/WebSocket was always undocumented, reverse-engineered
+> behavior, and live testing confirms the WebSocket handshake to
+> `wss://fireboard.io/ws` is now rejected by `paho-mqtt` (`WebSocket handshake
+> error, connection not upgraded`) even with a valid session. A raw
+> `aiohttp` WebSocket upgrade succeeds, so the endpoint is reachable but no
+> longer satisfies whatever `paho-mqtt`'s handshake validation expects
+> (likely a `Sec-WebSocket-Protocol` mismatch) — this was never fixed, just
+> made non-fatal.
+>
+> Because of this, `coordinator.py` no longer treats MQTT as the *only*
+> source of temperature/battery data: every REST poll now parses
+> `current_temp`/`last_templog` directly out of `devices.json`'s `channels`
+> array (which FireBoard's docs already promise is "< 60 seconds old"), so
+> sensors work correctly via REST polling alone. MQTT, if it starts working
+> again, would only improve latency between polls — it is no longer required
+> for the integration to function.
 
 ## User Experience
 

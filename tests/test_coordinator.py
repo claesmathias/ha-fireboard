@@ -162,15 +162,36 @@ async def test_coordinator_communication_error(hass, mock_config_entry_data):
             await coordinator._async_update_data()
 
 
-async def test_coordinator_preserves_mqtt_temperatures_across_refresh(
-    hass, mock_config_entry_data, mock_device_data, mock_temperature_data
+async def test_async_update_data_populates_temperatures_from_rest(
+    hass, mock_config_entry_data, mock_device_data
 ):
-    """Test that a REST refresh keeps temperature data pushed earlier via MQTT.
+    """Test temperature data is seeded directly from the REST devices.json response.
 
-    coordinator.py's _async_update_data explicitly carries forward the
-    "temperatures" dict already in self.data so an MQTT-pushed reading isn't
-    wiped out by the next periodic REST device-list refresh.
+    Live testing against the real FireBoard API showed devices.json already
+    embeds each channel's current_temp/last_templog (docs: "< 60 seconds
+    old"), and that the undocumented MQTT push feature can fail outright
+    (WebSocket handshake rejected). So _async_update_data must populate
+    temperatures from REST on every poll rather than depending on MQTT ever
+    having delivered a message -- otherwise sensors never get a value at all
+    when MQTT is unavailable.
     """
+    device = {
+        **mock_device_data,
+        "channels": [
+            {"channel": 1, "channel_label": "Probe 1"},  # no reading yet
+            {
+                "channel": 2,
+                "channel_label": "Probe 2",
+                "current_temp": 137.0,
+                "last_templog": {
+                    "channel": 2,
+                    "temp": 137.0,
+                    "created": "2026-08-09T13:15:04Z",
+                    "degreetype": 1,
+                },
+            },
+        ],
+    }
     config_entry = ConfigEntry(
         domain="fireboard",
         title="Test",
@@ -183,19 +204,24 @@ async def test_coordinator_preserves_mqtt_temperatures_across_refresh(
         mock_client = AsyncMock()
         mock_client._token = "test-token"
         mock_client.auth_token = "test-token"
-        mock_client.get_devices = AsyncMock(return_value=[mock_device_data])
+        mock_client.get_devices = AsyncMock(return_value=[device])
         mock_client_class.return_value = mock_client
 
         coordinator = FireBoardDataUpdateCoordinator(hass, config_entry)
         coordinator.client = mock_client
-        coordinator.data = {
-            mock_device_data["uuid"]: {"temperatures": mock_temperature_data}
-        }
 
         result = await coordinator._async_update_data()
 
-        assert result[mock_device_data["uuid"]]["online"] is True
-        assert result[mock_device_data["uuid"]]["temperatures"] == mock_temperature_data
+        temp_channels = result[device["uuid"]]["temperatures"]["channels"]
+        channel_1 = next(c for c in temp_channels if c["channel"] == 1)
+        channel_2 = next(c for c in temp_channels if c["channel"] == 2)
+
+        assert channel_1["current_temp"] is None
+        assert channel_1["probe_present"] is False
+        assert channel_2["current_temp"] == 137.0
+        assert channel_2["probe_present"] is True
+        assert channel_2["last_update"] == "2026-08-09T13:15:04Z"
+        assert result[device["uuid"]]["online"] is True
 
 
 async def test_async_setup_connects_mqtt_when_credentials_available(

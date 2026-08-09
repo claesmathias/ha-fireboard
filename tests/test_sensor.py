@@ -199,7 +199,7 @@ async def test_temperature_sensor_no_reading_yet(
 async def test_battery_sensor_invalid_value_returns_none(
     hass, mock_coordinator_data, mock_config_entry_data
 ):
-    """Test an unparseable battery_level is treated as no reading, not a crash."""
+    """Test an unparseable battery reading is treated as no reading, not a crash."""
     from custom_components.fireboard.coordinator import FireBoardDataUpdateCoordinator
     from custom_components.fireboard.sensor import FireBoardBatterySensor
 
@@ -210,7 +210,7 @@ async def test_battery_sensor_invalid_value_returns_none(
     )
 
     mock_coordinator_data["test-device-uuid-123"]["device_info"][
-        "battery_level"
+        "last_battery_reading"
     ] = "not-a-number"
 
     with patch("custom_components.fireboard.coordinator.FireBoardApiClient"):

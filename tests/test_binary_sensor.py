@@ -102,8 +102,10 @@ async def test_battery_low_sensor_low_battery(
         data=mock_config_entry_data,
     )
 
-    # Set battery to low level
-    mock_coordinator_data["test-device-uuid-123"]["device_info"]["battery_level"] = 15
+    # Set battery to a low level (15%)
+    mock_coordinator_data["test-device-uuid-123"]["device_info"][
+        "last_battery_reading"
+    ] = 0.15
 
     with patch("custom_components.fireboard.coordinator.FireBoardApiClient"):
         coordinator = FireBoardDataUpdateCoordinator(hass, config_entry)
@@ -122,7 +124,7 @@ async def test_battery_low_sensor_low_battery(
 async def test_battery_low_sensor_invalid_battery_level(
     hass, mock_coordinator_data, mock_config_entry_data
 ):
-    """Test battery low sensor treats an unparseable battery_level as not-low."""
+    """Test battery low sensor treats an unparseable reading as not-low."""
     from custom_components.fireboard.binary_sensor import FireBoardBatteryLowSensor
     from custom_components.fireboard.coordinator import FireBoardDataUpdateCoordinator
 
@@ -133,7 +135,7 @@ async def test_battery_low_sensor_invalid_battery_level(
     )
 
     mock_coordinator_data["test-device-uuid-123"]["device_info"][
-        "battery_level"
+        "last_battery_reading"
     ] = "not-a-number"
 
     with patch("custom_components.fireboard.coordinator.FireBoardApiClient"):
@@ -184,4 +186,4 @@ async def test_binary_sensor_setup_entry_creates_connectivity_and_battery_sensor
     connectivity = [e for e in entities if isinstance(e, FireBoardConnectivitySensor)]
     battery_low = [e for e in entities if isinstance(e, FireBoardBatteryLowSensor)]
     assert len(connectivity) == 1
-    assert len(battery_low) == 1  # mock_device_data has_battery=True
+    assert len(battery_low) == 1  # mock_device_data has last_battery_reading set

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ha-fireboard"
-version = "0.1.1"
+version = "0.1.2"
 description = "Home Assistant integration for FireBoard wireless thermometers"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -115,6 +115,8 @@ asyncio_default_fixture_loop_scope = "function"
 addopts = [
     "--strict-markers",
     "--strict-config",
+    "-m",
+    "not api",
     "--cov=custom_components.fireboard",
     "--cov-report=term-missing",
     "--cov-report=html",

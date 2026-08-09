@@ -48,6 +48,22 @@ pytest tests/test_api_client.py::test_authenticate_success
 open htmlcov/index.html
 ```
 
+### Live API Tests
+
+`tests/test_live_api.py` exercises the real FireBoard Cloud API (not mocks),
+to catch things the unit test suite can't: API response shape drift, auth
+quirks, or the undocumented MQTT feature breaking. It's excluded from the
+default `pytest` run (see the `api` marker / `-m "not api"` in
+`pyproject.toml`) so routine test runs never hit the network or your account.
+
+```bash
+# 1. Copy the credentials template and fill in a real FireBoard account
+cp .env.example .env   # .env is gitignored -- never commit real credentials
+
+# 2. Run just the live tests
+pytest -m api -v -s
+```
+
 ### Code Quality
 
 ```bash

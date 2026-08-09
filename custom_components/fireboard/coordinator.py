@@ -171,20 +171,37 @@ class FireBoardDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 if not device_uuid:
                     continue
 
-                # Keep existing temperature data if we have it (from MQTT)
-                existing_temps = {}
-                if self.data and device_uuid in self.data:
-                    existing_temps = self.data[device_uuid].get("temperatures", {})
-
                 # Extract channel information and latest temps from device data
                 channels = device.get("channels", [])
                 latest_temps = device.get("latest_temps", [])
+
+                # devices.json already embeds each channel's current_temp /
+                # last_templog (FireBoard docs: "< 60 seconds old"), so seed
+                # temperature data from REST on every poll rather than relying
+                # solely on MQTT pushes -- MQTT is undocumented/reverse
+                # engineered and can silently stop working, in which case
+                # sensors must not be left permanently without a value.
+                rest_channels = []
+                for channel in channels:
+                    channel_num = channel.get("channel")
+                    if channel_num is None:
+                        continue
+                    last_templog = channel.get("last_templog") or {}
+                    current_temp = channel.get("current_temp", last_templog.get("temp"))
+                    rest_channels.append(
+                        {
+                            "channel": channel_num,
+                            "current_temp": current_temp,
+                            "probe_present": current_temp is not None,
+                            "last_update": last_templog.get("created"),
+                        }
+                    )
 
                 device_data[device_uuid] = {
                     "device_info": device,
                     "channels": channels,
                     "latest_temps": latest_temps,
-                    "temperatures": existing_temps,  # Keep MQTT temps
+                    "temperatures": {"channels": rest_channels},
                     "online": True,
                 }
 
