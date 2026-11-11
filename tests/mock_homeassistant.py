@@ -13,6 +13,7 @@ class FlowResultType(Enum):
     FORM = "form"
     CREATE_ENTRY = "create_entry"
     ABORT = "abort"
+    MENU = "menu"
 
 
 class FlowResult:
@@ -99,6 +100,17 @@ class ConfigEntry:
         """Mock add_to_hass method."""
         pass
 
+    def add_update_listener(self, listener):
+        """Mock add_update_listener; returns an unsubscribe callable."""
+        self.update_listeners = getattr(self, "update_listeners", [])
+        self.update_listeners.append(listener)
+        return lambda: None
+
+    def async_on_unload(self, func):
+        """Mock async_on_unload."""
+        self.on_unload = getattr(self, "on_unload", [])
+        self.on_unload.append(func)
+
 
 # Alias matching pytest-homeassistant-custom-component's MockConfigEntry,
 # which the real test suite would otherwise provide.
@@ -144,10 +156,25 @@ class ConfigFlow:
 
     def async_show_form(self, step_id, data_schema=None, errors=None):
         """Mock async_show_form method."""
-        data = {"step_id": step_id}
+        data = {"step_id": step_id, "data_schema": data_schema}
         if errors:
             data["errors"] = errors
         return FlowResult("test_flow", FlowResultType.FORM, data)
+
+    def _get_reconfigure_entry(self):
+        """Mock _get_reconfigure_entry: the entry named in context."""
+        return self.context["entry"]
+
+    def _abort_if_unique_id_mismatch(self, reason="unique_id_mismatch"):
+        """Mock _abort_if_unique_id_mismatch."""
+        entry = self._get_reconfigure_entry()
+        if entry.unique_id is not None and entry.unique_id != self.unique_id:
+            raise AbortFlow(reason)
+
+    def async_update_reload_and_abort(self, entry, data_updates=None):
+        """Mock async_update_reload_and_abort."""
+        entry.data = {**entry.data, **(data_updates or {})}
+        return self.async_abort(reason="reconfigure_successful")
 
     def async_create_entry(self, title, data):
         """Mock async_create_entry method."""
@@ -158,6 +185,51 @@ class ConfigFlow:
     def async_abort(self, reason):
         """Mock async_abort method."""
         return FlowResult("test_flow", FlowResultType.ABORT, {"reason": reason})
+
+
+class OptionsFlow:
+    """Mock OptionsFlow class (config_entry is assigned by the caller)."""
+
+    config_entry = None
+    hass = None
+
+    def async_show_form(
+        self, step_id, data_schema=None, errors=None, description_placeholders=None
+    ):
+        """Mock async_show_form method."""
+        data = {
+            "step_id": step_id,
+            "data_schema": data_schema,
+            "description_placeholders": description_placeholders,
+        }
+        if errors:
+            data["errors"] = errors
+        return FlowResult("test_flow", FlowResultType.FORM, data)
+
+    def async_show_menu(self, step_id, menu_options):
+        """Mock async_show_menu method."""
+        return FlowResult(
+            "test_flow",
+            FlowResultType.MENU,
+            {"step_id": step_id, "menu_options": menu_options},
+        )
+
+    def async_abort(self, reason, description_placeholders=None):
+        """Mock async_abort method."""
+        return FlowResult(
+            "test_flow",
+            FlowResultType.ABORT,
+            {"reason": reason, "description_placeholders": description_placeholders},
+        )
+
+    def async_create_entry(self, data, title=""):
+        """Mock async_create_entry method."""
+        return FlowResult("test_flow", FlowResultType.CREATE_ENTRY, dict(data))
+
+
+def callback(func):
+    """Mock homeassistant.core.callback decorator."""
+    return func
 
 
 class FlowManager:
@@ -199,6 +271,11 @@ class ConfigEntries:
         """Mock async_unload_platforms method."""
         return True
 
+    async def async_reload(self, entry_id):
+        """Mock async_reload method."""
+        self.reloaded = getattr(self, "reloaded", [])
+        self.reloaded.append(entry_id)
+
 
 SOURCE_USER = "user"
 
@@ -230,6 +307,17 @@ class DataUpdateCoordinator:
         self.last_update_success = True
         self.last_exception: Exception | None = None
         self._setup_done = False
+        self._listeners: list = []
+
+    def async_add_listener(self, update_callback, context=None):
+        """Mock async_add_listener; returns an unsubscribe callable."""
+        self._listeners.append(update_callback)
+        return lambda: self._listeners.remove(update_callback)
+
+    def async_update_listeners(self):
+        """Call every registered listener, like the real coordinator."""
+        for listener in list(self._listeners):
+            listener()
 
     async def _async_setup(self) -> None:
         """Overridden by subclasses; no-op by default."""
@@ -250,6 +338,7 @@ class DataUpdateCoordinator:
             self.data = await self._async_update_data()
             self.last_update_success = True
             self.last_exception = None
+            self.async_update_listeners()
         except UpdateFailed as err:
             self.last_exception = err
             self.last_update_success = False
@@ -269,6 +358,7 @@ class DataUpdateCoordinator:
         """Mock async_set_updated_data."""
         self.data = data
         self.last_update_success = True
+        self.async_update_listeners()
 
     def __class_getitem__(cls, item):
         """Support generic type parameters."""
@@ -335,11 +425,52 @@ class Entity:
     pass
 
 
+class NumberEntity:
+    """Mock NumberEntity class."""
+
+    @property
+    def native_unit_of_measurement(self):
+        """Return _attr_native_unit_of_measurement, mirroring real HA."""
+        return getattr(self, "_attr_native_unit_of_measurement", None)
+
+
+class NumberMode:
+    """Mock NumberMode enum."""
+
+    AUTO = "auto"
+    BOX = "box"
+    SLIDER = "slider"
+
+
+class NumberDeviceClass:
+    """Mock NumberDeviceClass enum."""
+
+    TEMPERATURE = "temperature"
+
+
+class ButtonEntity:
+    """Mock ButtonEntity class."""
+
+    pass
+
+
+class MockSelectorModule:
+    """Mock homeassistant.helpers.selector: every attribute is a passthrough."""
+
+    def __getattr__(self, name):
+        """Return a passthrough for any selector class or enum."""
+        if name.endswith("Type") or name.endswith("Mode"):
+            return MagicMock()
+        return lambda *args, **kwargs: {"selector": name, "args": args, **kwargs}
+
+
 # Mock constants
 class Platform(Enum):
     """Mock Platform enum."""
 
     BINARY_SENSOR = "binary_sensor"
+    BUTTON = "button"
+    NUMBER = "number"
     SENSOR = "sensor"
 
 
@@ -369,6 +500,7 @@ class SensorDeviceClass:
     TEMPERATURE = "temperature"
     BATTERY = "battery"
     VOLTAGE = "voltage"
+    SIGNAL_STRENGTH = "signal_strength"
 
 
 class SensorStateClass:
@@ -380,12 +512,15 @@ class SensorStateClass:
 class EntityCategory:
     """Mock EntityCategory enum."""
 
+    CONFIG = "config"
     DIAGNOSTIC = "diagnostic"
 
 
 # Mock configuration constants
 CONF_EMAIL = "email"
 CONF_PASSWORD = "password"
+PERCENTAGE = "%"
+SIGNAL_STRENGTH_DECIBELS_MILLIWATT = "dBm"
 
 
 class MockModule:
@@ -406,11 +541,12 @@ class MockVoluptuous:
 
 # Mock the homeassistant module structure
 homeassistant = MockModule(
-    core=MockModule(HomeAssistant=HomeAssistant),
+    core=MockModule(HomeAssistant=HomeAssistant, callback=callback),
     config_entries=MockModule(
         ConfigEntry=ConfigEntry,
         ConfigFlow=ConfigFlow,
         ConfigEntries=ConfigEntries,
+        OptionsFlow=OptionsFlow,
         SOURCE_USER=SOURCE_USER,
     ),
     data_entry_flow=MockModule(
@@ -426,6 +562,9 @@ homeassistant = MockModule(
         UnitOfElectricPotential=UnitOfElectricPotential,
         CONF_EMAIL=CONF_EMAIL,
         CONF_PASSWORD=CONF_PASSWORD,
+        PERCENTAGE=PERCENTAGE,
+        SIGNAL_STRENGTH_DECIBELS_MILLIWATT=SIGNAL_STRENGTH_DECIBELS_MILLIWATT,
+        EntityCategory=EntityCategory,
     ),
     helpers=MockModule(
         entity=MockModule(
@@ -443,6 +582,7 @@ homeassistant = MockModule(
             UpdateFailed=UpdateFailed,
             CoordinatorEntity=CoordinatorEntity,
         ),
+        selector=MockSelectorModule(),
         aiohttp_client=MockModule(
             async_get_clientsession=lambda hass: MagicMock(),
         ),
@@ -452,6 +592,12 @@ homeassistant = MockModule(
             BinarySensorEntity=BinarySensorEntity,
             BinarySensorDeviceClass=BinarySensorDeviceClass,
         ),
+        number=MockModule(
+            NumberEntity=NumberEntity,
+            NumberMode=NumberMode,
+            NumberDeviceClass=NumberDeviceClass,
+        ),
+        button=MockModule(ButtonEntity=ButtonEntity),
         sensor=MockModule(
             SensorEntity=SensorEntity,
             SensorDeviceClass=SensorDeviceClass,

@@ -39,6 +39,9 @@ except ImportError:
         homeassistant.components.binary_sensor
     )
     sys.modules["homeassistant.components.sensor"] = homeassistant.components.sensor
+    sys.modules["homeassistant.components.number"] = homeassistant.components.number
+    sys.modules["homeassistant.components.button"] = homeassistant.components.button
+    sys.modules["homeassistant.helpers.selector"] = homeassistant.helpers.selector
     sys.modules["voluptuous"] = voluptuous
 
     from homeassistant.core import HomeAssistant

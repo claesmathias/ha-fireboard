@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from homeassistant.config_entries import ConfigEntry
 
@@ -172,6 +172,8 @@ async def test_binary_sensor_setup_entry_creates_connectivity_and_battery_sensor
     )
 
     mock_coordinator = AsyncMock()
+
+    mock_coordinator.async_add_listener = MagicMock()
     mock_coordinator.data = mock_coordinator_data
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN][config_entry.entry_id] = mock_coordinator
@@ -262,6 +264,8 @@ async def test_binary_sensor_setup_creates_lid_paused_when_drivelog_present(
     }
 
     mock_coordinator = AsyncMock()
+
+    mock_coordinator.async_add_listener = MagicMock()
     mock_coordinator.data = mock_coordinator_data
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN][config_entry.entry_id] = mock_coordinator

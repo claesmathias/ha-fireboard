@@ -39,7 +39,11 @@ async def test_user_success(hass, mock_config_entry_data):
 
         assert result["type"] == FlowResultType.CREATE_ENTRY
         assert result["title"] == f"FireBoard ({mock_config_entry_data[CONF_EMAIL]})"
-        assert result["data"] == mock_config_entry_data
+        # Polling interval is no longer asked at setup; it lives in options.
+        assert result["data"] == {
+            CONF_EMAIL: mock_config_entry_data[CONF_EMAIL],
+            "password": mock_config_entry_data["password"],
+        }
 
 
 async def test_user_invalid_auth(hass, mock_config_entry_data):
@@ -120,11 +124,7 @@ async def test_user_rate_limit(hass, mock_config_entry_data):
 async def test_user_unexpected_error_during_connection_test(
     hass, mock_config_entry_data
 ):
-    """Test an unexpected error from the API client surfaces as cannot_connect.
-
-    A non-FireBoard-specific error is caught by _test_connection's broad
-    except clause.
-    """
+    """Test an unexpected error from the API client surfaces as unknown."""
     with patch(
         "custom_components.fireboard.config_flow.FireBoardApiClient"
     ) as mock_client:
@@ -139,7 +139,7 @@ async def test_user_unexpected_error_during_connection_test(
         )
 
         assert result["type"] == FlowResultType.FORM
-        assert result["errors"] == {"base": "cannot_connect"}
+        assert result["errors"] == {"base": "unknown"}
 
 
 async def test_user_unexpected_error_constructing_client(hass, mock_config_entry_data):

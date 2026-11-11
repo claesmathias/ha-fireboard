@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Iterable
 from typing import Any
 
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import callback
 from homeassistant.helpers.device_registry import DeviceInfo
+from homeassistant.helpers.entity import Entity
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
@@ -37,7 +42,11 @@ class FireBoardEntity(CoordinatorEntity[FireBoardDataUpdateCoordinator]):
         device_info = device_data.get("device_info", {})
 
         self._device_title = device_info.get("title", "FireBoard")
-        self._device_model = device_info.get("hardware_id", "Unknown")
+        # "model_name" is the marketing name (e.g. "FireBoard 2 Pro");
+        # "hardware_id" is the board's serial, used only as a fallback.
+        self._device_model = (
+            device_info.get("model_name") or device_info.get("hardware_id") or "Unknown"
+        )
 
     @property
     def device_info(self) -> DeviceInfo:
@@ -50,6 +59,8 @@ class FireBoardEntity(CoordinatorEntity[FireBoardDataUpdateCoordinator]):
             name=self._device_title,
             manufacturer="FireBoard",
             model=self._device_model,
+            model_id=device_info.get("model"),
+            serial_number=device_info.get("hardware_id"),
             # devices.json has no "software_version" field; "version" is the
             # closest match (device firmware/image version, e.g. "4.2.30").
             sw_version=device_info.get("version"),
@@ -76,3 +87,39 @@ class FireBoardEntity(CoordinatorEntity[FireBoardDataUpdateCoordinator]):
     def _temperatures(self) -> dict[str, Any]:
         """Return temperature data for this device."""
         return self._device_data.get("temperatures", {})
+
+
+def device_has_drive(device_data: dict[str, Any]) -> bool:
+    """Return whether a FireBoard Drive has been seen on this device."""
+    return bool(
+        device_data.get("has_drive")
+        or device_data.get("device_info", {}).get("last_drivelog")
+    )
+
+
+def async_add_drive_entities(
+    coordinator: FireBoardDataUpdateCoordinator,
+    config_entry: ConfigEntry,
+    async_add_entities: AddEntitiesCallback,
+    factory: Callable[[str], Iterable[Entity]],
+) -> None:
+    """Add Drive entities now, and later for any Drive that shows up.
+
+    A Drive is often only detected after setup (it reports only while
+    plugged in and running), so listen for coordinator updates instead of
+    requiring a reload.
+    """
+    added: set[str] = set()
+
+    @callback
+    def _add_new_drives() -> None:
+        new_entities: list[Entity] = []
+        for device_uuid, device_data in (coordinator.data or {}).items():
+            if device_uuid not in added and device_has_drive(device_data):
+                added.add(device_uuid)
+                new_entities.extend(factory(device_uuid))
+        if new_entities:
+            async_add_entities(new_entities)
+
+    _add_new_drives()
+    config_entry.async_on_unload(coordinator.async_add_listener(_add_new_drives))

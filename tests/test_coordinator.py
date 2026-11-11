@@ -40,6 +40,12 @@ async def test_coordinator_update_success(
         mock_client.auth_token = "test-token"
         mock_client.session_cookies = {"sessionid": "test-session"}
         mock_client.authenticate = AsyncMock(return_value=True)
+        from datetime import datetime, timezone
+
+        mock_device_data["device_log"] = {
+            "date": datetime.now(timezone.utc).isoformat(),
+            "signallevel": -60,
+        }
         mock_client.get_devices = AsyncMock(return_value=[mock_device_data])
         mock_client_class.return_value = mock_client
         # FireBoardMQTTClient's own methods (connect, subscribe_device, ...) are
@@ -698,6 +704,7 @@ def test_extract_drive_status_returns_mode_and_lid_paused():
         "mode": "Auto",
         "power_mode": "Heating",
         "lid_paused": True,
+        "created": None,
     }
 
 
@@ -773,7 +780,10 @@ async def test_async_update_data_fetches_drive_status_via_session_detail(
             "mode": "Off",
             "power_mode": "N/A",
             "lid_paused": False,
+            "created": None,
         }
+        # Seen in session detail -> the device is known to have a Drive.
+        assert result[mock_device_data["uuid"]]["has_drive"] is True
 
 
 async def test_async_update_data_caps_session_detail_fetches_per_refresh(

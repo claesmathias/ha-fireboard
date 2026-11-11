@@ -10,12 +10,15 @@ from homeassistant.core import HomeAssistant
 
 from .const import DOMAIN
 from .coordinator import FireBoardDataUpdateCoordinator
+from .notifications import FireBoardNotifier
 
 _LOGGER = logging.getLogger(__name__)
 
 PLATFORMS: list[Platform] = [
     Platform.SENSOR,
     Platform.BINARY_SENSOR,
+    Platform.NUMBER,
+    Platform.BUTTON,
 ]
 
 
@@ -26,10 +29,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Create coordinator
     coordinator = FireBoardDataUpdateCoordinator(hass, entry)
 
-    # Set up MQTT connection
-    await coordinator._async_setup()
-
-    # Fetch initial data
+    # Fetch initial data. DataUpdateCoordinator runs _async_setup()
+    # (authentication + MQTT) as part of the first refresh, so it must not
+    # also be called here -- doing so logged in and connected MQTT twice.
     await coordinator.async_config_entry_first_refresh()
 
     # Store coordinator
@@ -38,7 +40,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Set up platforms
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
+    # Built-in notifications (Configure > Notifications).
+    notifier = FireBoardNotifier(hass, entry, coordinator)
+    entry.async_on_unload(coordinator.async_add_listener(notifier.async_handle_update))
+
+    # Apply changes from the Configure (options) dialog by reloading.
+    entry.async_on_unload(entry.add_update_listener(_async_update_listener))
+
     return True
+
+
+async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Reload the integration when its options change."""
+    await hass.config_entries.async_reload(entry.entry_id)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

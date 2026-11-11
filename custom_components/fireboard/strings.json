@@ -2,24 +2,101 @@
   "config": {
     "step": {
       "user": {
-        "title": "Set up FireBoard",
-        "description": "Enter your FireBoard account credentials.",
+        "title": "FireBoard account",
+        "description": "Enter the credentials of your FireBoard account. All devices registered to the account will be added.\n\nAdditional settings are available under **Configure** after setup.",
         "data": {
           "email": "Email",
-          "password": "Password",
-          "polling_interval": "Polling Interval (seconds)"
+          "password": "Password"
+        },
+        "data_description": {
+          "email": "Email address of the FireBoard account.",
+          "password": "Password of the FireBoard account. It is stored in Home Assistant and transmitted only to fireboard.io."
+        }
+      },
+      "reconfigure": {
+        "title": "Update credentials",
+        "description": "Update the password used for this FireBoard account. The integration is reloaded afterwards; existing entities and history are retained.",
+        "data": {
+          "email": "Email",
+          "password": "Password"
+        },
+        "data_description": {
+          "email": "Must match the FireBoard account this entry was created with.",
+          "password": "Current password of the FireBoard account."
         }
       }
     },
     "error": {
-      "cannot_connect": "Failed to connect to FireBoard API",
-      "invalid_auth": "Invalid email or password",
-      "rate_limit": "Rate limit exceeded. Please try again later.",
-      "unknown": "Unexpected error occurred"
+      "cannot_connect": "Unable to connect to fireboard.io. Verify the network connection and try again.",
+      "invalid_auth": "Invalid email address or password.",
+      "rate_limit": "The FireBoard API rate limit has been reached for this account. Try again in a few minutes.",
+      "unknown": "An unexpected error occurred. See the Home Assistant log for details."
     },
     "abort": {
-      "already_configured": "This FireBoard account is already configured"
+      "already_configured": "This FireBoard account is already configured.",
+      "reconfigure_successful": "The credentials have been updated.",
+      "wrong_account": "The credentials belong to a different FireBoard account. To add another account, add a new instance of the integration."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "FireBoard settings",
+        "description": "Select a category.",
+        "menu_options": {
+          "general": "General",
+          "notifications": "Notifications",
+          "probe_alerts": "Probe alerts",
+          "test_notification": "Send test notification"
+        }
+      },
+      "general": {
+        "title": "General",
+        "description": "The FireBoard API permits a maximum of 17 requests per 5 minutes per account. This limit is shared with the FireBoard app. A shorter update interval provides more current readings but consumes more of this allowance.",
+        "data": {
+          "polling_interval": "Update interval",
+          "battery_low_threshold": "Low battery threshold",
+          "drive_controls": "Enable FireBoard Drive control"
+        },
+        "data_description": {
+          "polling_interval": "Interval at which temperatures, battery and Drive status are retrieved from FireBoard Cloud (40–300 seconds).",
+          "battery_low_threshold": "Battery level below which the Battery Low sensor is activated.",
+          "drive_controls": "Provides entities for the target temperature, manual fan speed and shutdown of FireBoard Drive fan controllers. Disable for read-only operation."
+        }
+      },
+      "notifications": {
+        "title": "Notifications",
+        "description": "Select the notification recipients and the events to report. Each alert is sent once when a value crosses its threshold.{phone_hint}",
+        "data": {
+          "notify_targets": "Recipients",
+          "notify_probe_alerts": "Probe temperature alerts",
+          "notify_live": "Live cook status",
+          "notify_lid": "Drive paused (lid open)",
+          "notify_offline": "Device offline",
+          "notify_battery": "Low battery"
+        },
+        "data_description": {
+          "notify_targets": "Mobile devices running the Home Assistant Companion app, and/or Home Assistant persistent notifications.",
+          "notify_probe_alerts": "Sent when a probe reaches its target temperature or falls below its minimum temperature. Thresholds are configured under Probe alerts or in the FireBoard app.",
+          "notify_live": "A single notification, updated silently with current probe temperatures and Drive status while the device is active. It is removed when the device goes offline.",
+          "notify_lid": "Sent when the FireBoard Drive pauses its fan because an open lid has been detected.",
+          "notify_offline": "Sent when FireBoard Cloud no longer receives data from the device.",
+          "notify_battery": "Sent when the battery level falls below the threshold configured under General."
+        }
+      },
+      "probe_alerts": {
+        "title": "Probe alerts",
+        "description": "Configure a target temperature and a minimum temperature per probe, in the unit of the FireBoard account (0–1000). Leave both fields empty to use the alerts configured in the FireBoard app.\n\nProbe temperature alerts must be enabled under Notifications."
+      }
+    },
+    "abort": {
+      "no_probes": "No FireBoard devices are available yet. Try again shortly.",
+      "no_targets": "No notification recipients have been configured. Select recipients under Notifications first.",
+      "test_sent": "A test notification has been sent to: {delivered}.\n\nIf it was not received, verify that notifications for the Home Assistant app are permitted on the device.",
+      "test_failed": "The test notification could not be delivered to: {failed}.\n\nDelivered to: {delivered}.\n\nVerify the recipients under Notifications. See the Home Assistant log for details."
+    },
+    "error": {
+      "temperature_out_of_range": "Enter a temperature between 0 and 1000."
     }
   }
 }
-

@@ -178,6 +178,7 @@ class FireBoardApiClient:
         self,
         method: str,
         endpoint: str,
+        expect_json: bool = True,
         **kwargs: Any,
     ) -> dict[str, Any] | list[dict[str, Any]]:
         """Make an authenticated API request with session cookies.
@@ -185,6 +186,7 @@ class FireBoardApiClient:
         Args:
             method: HTTP method (GET, POST, etc.)
             endpoint: API endpoint (without base URL)
+            expect_json: If False, tolerate an empty/non-JSON response body
             **kwargs: Additional arguments to pass to the request
 
         Returns:
@@ -246,6 +248,13 @@ class FireBoardApiClient:
                     raise FireBoardApiClientRateLimitError("Rate limit exceeded")
 
                 response.raise_for_status()
+                if not expect_json:
+                    # Command endpoints (e.g. mq.json) may reply with an
+                    # empty or non-JSON body; success is the 2xx status.
+                    try:
+                        return await response.json(content_type=None) or {}
+                    except ValueError:
+                        return {}
                 return await response.json()
 
         except aiohttp.ClientError as err:
@@ -322,6 +331,57 @@ class FireBoardApiClient:
         """
         result = await self._request("GET", f"sessions/{session_id}.json")
         return result if isinstance(result, dict) else {}
+
+    async def send_device_command(
+        self, device_uuid: str, payload: dict[str, Any]
+    ) -> None:
+        """Send a control command to a device through FireBoard Cloud.
+
+        Mirrors what the official FireBoard Android app (v4.5.2) does for
+        Drive control: it POSTs {"topic": "device", "payload": {...}} to
+        /api/v1/devices/<uuid>/mq.json, and the cloud relays the payload to
+        the device over its own MQTT link. This avoids depending on our
+        (reverse-engineered) MQTT connection for anything that writes.
+
+        Args:
+            device_uuid: Device UUID
+            payload: Device command, e.g.
+                {"request_type": "control", "t": "fan", "setpoint": "225"}
+
+        Raises:
+            FireBoardApiClientError: If request fails
+
+        """
+        await self._request(
+            "POST",
+            f"devices/{device_uuid}/mq.json",
+            expect_json=False,
+            json={"topic": "device", "payload": payload},
+        )
+
+    async def set_drive_setpoint(self, device_uuid: str, setpoint: float) -> None:
+        """Put a FireBoard Drive in Auto mode targeting the given temperature.
+
+        The setpoint is in the device's configured unit. A setpoint of 0
+        turns the Drive off (this is exactly how the app's "Off" works).
+        """
+        value = int(setpoint) if float(setpoint).is_integer() else setpoint
+        await self.send_device_command(
+            device_uuid,
+            {"request_type": "control", "t": "fan", "setpoint": str(value)},
+        )
+
+    async def set_drive_fan_speed(self, device_uuid: str, percent: float) -> None:
+        """Put a FireBoard Drive in Manual mode at a fixed fan speed (0-100%)."""
+        ratio = max(0.0, min(100.0, float(percent))) / 100.0
+        await self.send_device_command(
+            device_uuid,
+            {"request_type": "control", "t": "fan", "p": f"{ratio:.2f}"},
+        )
+
+    async def turn_drive_off(self, device_uuid: str) -> None:
+        """Turn a FireBoard Drive off."""
+        await self.set_drive_setpoint(device_uuid, 0)
 
     @property
     def auth_token(self) -> str | None:

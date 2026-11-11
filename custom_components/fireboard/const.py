@@ -17,11 +17,32 @@ API_RATE_LIMIT_WINDOW_SECONDS: Final = 300
 CONF_EMAIL: Final = "email"
 CONF_PASSWORD: Final = "password"
 CONF_POLLING_INTERVAL: Final = "polling_interval"
+CONF_BATTERY_LOW_THRESHOLD: Final = "battery_low_threshold"
+CONF_DRIVE_CONTROLS: Final = "drive_controls"
+
+# Notification settings (Configure > Notifications / Probe alerts)
+CONF_NOTIFY_TARGETS: Final = "notify_targets"
+CONF_NOTIFY_PROBE_ALERTS: Final = "notify_probe_alerts"
+CONF_NOTIFY_LIVE: Final = "notify_live"
+CONF_NOTIFY_LID: Final = "notify_lid"
+CONF_NOTIFY_OFFLINE: Final = "notify_offline"
+CONF_NOTIFY_BATTERY: Final = "notify_battery"
+CONF_PROBE_ALERTS: Final = "probe_alerts"
+# Pseudo notify target: Home Assistant's own sidebar notifications.
+NOTIFY_TARGET_PERSISTENT: Final = "persistent_notification"
 
 # Default values
 DEFAULT_POLLING_INTERVAL: Final = 40  # seconds (90 calls/hour, well under 200 limit)
 MIN_POLLING_INTERVAL: Final = 40  # minimum to respect rate limits
 MAX_POLLING_INTERVAL: Final = 300  # 5 minutes maximum
+DEFAULT_BATTERY_LOW_THRESHOLD: Final = 20  # percent
+
+# Temperature limits, matching the FireBoard Android app (v4.5.2): its alert
+# fields only accept unsigned numbers (inputType="numberDecimal"), and it
+# clamps the Drive setpoint to 0-1000. Values are in the account's unit.
+TEMPERATURE_MIN: Final = 0
+TEMPERATURE_MAX: Final = 1000
+DEFAULT_DRIVE_CONTROLS: Final = True
 
 # Device information
 ATTR_DEVICE_ID: Final = "device_id"

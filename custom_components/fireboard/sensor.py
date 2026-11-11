@@ -11,13 +11,19 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import UnitOfElectricPotential, UnitOfTemperature
+from homeassistant.const import (
+    SIGNAL_STRENGTH_DECIBELS_MILLIWATT,
+    EntityCategory,
+    UnitOfElectricPotential,
+    UnitOfTemperature,
+)
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import ATTR_SESSION_ID, ATTR_SESSION_START, DOMAIN
 from .coordinator import FireBoardDataUpdateCoordinator
-from .entity import FireBoardEntity
+from .entity import FireBoardEntity, async_add_drive_entities
+from .util import drive_mode, wifi_signal_percent
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -79,19 +85,29 @@ async def async_setup_entry(
                 )
             )
 
-        # FireBoard Drive (fan controller) sensors, if this device has one
-        # attached. devices.json embeds "last_drivelog" directly whenever a
-        # Drive has ever reported for the device.
-        if device_info.get("last_drivelog"):
-            entities.append(FireBoardDriveSetpointSensor(coordinator, device_uuid))
-            entities.append(FireBoardDriveFanSensor(coordinator, device_uuid))
-            entities.append(FireBoardDriveModeSensor(coordinator, device_uuid))
-            entities.append(FireBoardDriveBatterySensor(coordinator, device_uuid))
-
         # Current/most recent cook session for this device.
         entities.append(FireBoardSessionSensor(coordinator, device_uuid))
 
+        # WiFi signal. Created for every device (rather than only when
+        # device_log is present) since device_log is null whenever the
+        # device happens to be powered off at setup time.
+        entities.append(FireBoardWifiSignalSensor(coordinator, device_uuid))
+
     async_add_entities(entities)
+
+    # FireBoard Drive (fan controller) sensors, added whenever a Drive is
+    # detected on a device -- at setup or later.
+    async_add_drive_entities(
+        coordinator,
+        config_entry,
+        async_add_entities,
+        lambda device_uuid: [
+            FireBoardDriveSetpointSensor(coordinator, device_uuid),
+            FireBoardDriveFanSensor(coordinator, device_uuid),
+            FireBoardDriveModeSensor(coordinator, device_uuid),
+            FireBoardDriveBatterySensor(coordinator, device_uuid),
+        ],
+    )
 
 
 class FireBoardTemperatureSensor(FireBoardEntity, SensorEntity):
@@ -195,7 +211,26 @@ class FireBoardTemperatureSensor(FireBoardEntity, SensorEntity):
         # Add channel number
         attributes["channel"] = self._channel_number
 
+        # Alert thresholds configured for this channel in the FireBoard app
+        # (FBAlert: temp_min/temp_max). Exposed so automations can mirror
+        # them without duplicating the values in Home Assistant.
+        alerts = self._get_channel_config().get("alerts") or []
+        for alert in alerts:
+            if not isinstance(alert, dict):
+                continue
+            if alert.get("temp_min") is not None:
+                attributes.setdefault("alert_min_temp", alert["temp_min"])
+            if alert.get("temp_max") is not None:
+                attributes.setdefault("alert_max_temp", alert["temp_max"])
+
         return attributes
+
+    def _get_channel_config(self) -> dict[str, Any]:
+        """Return this channel's raw configuration from devices.json."""
+        for channel in self._device_data.get("device_info", {}).get("channels", []):
+            if channel.get("channel") == self._channel_number:
+                return channel
+        return {}
 
 
 class FireBoardBatterySensor(FireBoardEntity, SensorEntity):
@@ -341,6 +376,15 @@ class FireBoardSessionSensor(FireBoardEntity, SensorEntity):
         self._attr_name = f"{self._device_title} Session"
 
     @property
+    def available(self) -> bool:
+        """Stay available while the device is offline.
+
+        The most recent session is account data, not live device data, so
+        it remains meaningful after the device powers off.
+        """
+        return self.coordinator.last_update_success
+
+    @property
     def native_value(self) -> str:
         """Return the session title, or a placeholder if none is known."""
         session = self._device_data.get("session")
@@ -372,11 +416,10 @@ class FireBoardSessionSensor(FireBoardEntity, SensorEntity):
 class FireBoardDriveModeSensor(FireBoardEntity, SensorEntity):
     """Representation of a FireBoard Drive's operating mode (Auto/Manual/Off).
 
-    Sourced from session detail rather than devices.json, since only session
-    detail reports FireBoard's own human-readable mode string -- devices.json
-    only exposes this as an undocumented raw integer with no published
-    mapping. Only refreshed on the (throttled) session-polling cycle, so this
-    can lag briefly behind an actual mode change made in the FireBoard app.
+    Derived from devices.json's raw last_drivelog "modetype" using the
+    mapping in the official FireBoard app (0 = Off, 1 = Manual, 2 = Auto),
+    so it updates on every poll. Falls back to the human-readable mode
+    string from session detail if modetype is missing.
     """
 
     _attr_icon = "mdi:fan"
@@ -394,18 +437,38 @@ class FireBoardDriveModeSensor(FireBoardEntity, SensorEntity):
 
     @property
     def native_value(self) -> str:
-        """Return the Drive's mode, or "Unknown" if not yet fetched."""
+        """Return the Drive's mode, or "Unknown" if it can't be determined."""
+        drivelog = self._device_data.get("device_info", {}).get("last_drivelog")
+        mode = drive_mode(drivelog)
+        if mode:
+            return mode
+        # devices.json drops last_drivelog when the Drive stops reporting;
+        # session detail's copy is then usually old, and drive_mode() turns
+        # a stale one into "Off" rather than repeating a past cook's mode.
         drive_status = self._device_data.get("drive_status")
-        mode = drive_status.get("mode") if drive_status else None
-        return mode or "Unknown"
+        if drive_status:
+            mode = drive_mode(
+                {
+                    "modetype": drive_status.get("mode"),
+                    "created": drive_status.get("created"),
+                    "setpoint": 1,  # unknown here; skip the 0/0 "off" rule
+                }
+            )
+            if mode:
+                return mode
+        return "Unknown"
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        """Return the raw power_mode value alongside the mode."""
+        """Return the controlled channel and raw power_mode, when known."""
+        attributes: dict[str, Any] = {}
+        drivelog = self._device_data.get("device_info", {}).get("last_drivelog") or {}
+        if drivelog.get("tiedchannel") is not None:
+            attributes["controlled_channel"] = drivelog["tiedchannel"]
         drive_status = self._device_data.get("drive_status")
-        if not drive_status or drive_status.get("power_mode") is None:
-            return {}
-        return {"power_mode": drive_status["power_mode"]}
+        if drive_status and drive_status.get("power_mode") is not None:
+            attributes["power_mode"] = drive_status["power_mode"]
+        return attributes
 
 
 class FireBoardDriveBatterySensor(FireBoardEntity, SensorEntity):
@@ -446,3 +509,53 @@ class FireBoardDriveBatterySensor(FireBoardEntity, SensorEntity):
                 return None
 
         return None
+
+
+class FireBoardWifiSignalSensor(FireBoardEntity, SensorEntity):
+    """Representation of a FireBoard device's WiFi signal strength.
+
+    Read from devices.json's "device_log", which the device uploads
+    periodically along with its SSID and firmware details.
+    """
+
+    _attr_device_class = SensorDeviceClass.SIGNAL_STRENGTH
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = SIGNAL_STRENGTH_DECIBELS_MILLIWATT
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(
+        self,
+        coordinator: FireBoardDataUpdateCoordinator,
+        device_uuid: str,
+    ) -> None:
+        """Initialize the WiFi signal sensor."""
+        super().__init__(coordinator, device_uuid)
+
+        self._attr_unique_id = f"{device_uuid}_wifi_signal"
+        self._attr_name = f"{self._device_title} WiFi Signal"
+
+    @property
+    def _device_log(self) -> dict[str, Any]:
+        return self._device_data.get("device_log") or {}
+
+    @property
+    def native_value(self) -> int | None:
+        """Return the WiFi RSSI in dBm (0 means no reading)."""
+        level = self._device_log.get("signallevel")
+        try:
+            dbm = int(float(level))
+        except (TypeError, ValueError):
+            return None
+        return dbm or None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return signal percentage and network name."""
+        attributes: dict[str, Any] = {}
+        percent = wifi_signal_percent(self._device_log.get("signallevel"))
+        if percent is not None:
+            attributes["signal_percent"] = percent
+        if self._device_log.get("ssid"):
+            attributes["ssid"] = self._device_log["ssid"]
+        return attributes

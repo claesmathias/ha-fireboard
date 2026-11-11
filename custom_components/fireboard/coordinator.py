@@ -3,22 +3,26 @@
 from __future__ import annotations
 
 import logging
-from datetime import timedelta
+from collections.abc import Awaitable, Callable
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_EMAIL, CONF_PASSWORD
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .api_client import (
     FireBoardApiClient,
     FireBoardApiClientCommunicationError,
+    FireBoardApiClientError,
     FireBoardApiClientRateLimitError,
 )
 from .const import CONF_POLLING_INTERVAL, DEFAULT_POLLING_INTERVAL, DOMAIN
 from .mqtt_client import FireBoardMQTTClient
+from .util import is_device_online
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -52,8 +56,11 @@ class FireBoardDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             session=session,
         )
 
-        polling_interval = config_entry.data.get(
-            CONF_POLLING_INTERVAL, DEFAULT_POLLING_INTERVAL
+        # Options (set via the Configure dialog) take precedence over the
+        # value older entries stored in entry data at setup time.
+        polling_interval = config_entry.options.get(
+            CONF_POLLING_INTERVAL,
+            config_entry.data.get(CONF_POLLING_INTERVAL, DEFAULT_POLLING_INTERVAL),
         )
 
         super().__init__(
@@ -191,6 +198,7 @@ class FireBoardDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return {
                 "mode": drivelog.get("modetype"),
                 "power_mode": drivelog.get("powermode"),
+                "created": drivelog.get("created"),
                 "lid_paused": drivelog.get("lidpaused"),
             }
         return None
@@ -345,6 +353,18 @@ class FireBoardDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         }
                     )
 
+                # A Drive is attached if devices.json carries a drivelog, or
+                # session detail recorded one for this device. FireBoard
+                # nulls devices.json's last_drivelog once the device goes
+                # idle, so once seen, remember it rather than making the
+                # Drive entities disappear between cooks.
+                previous = self.data.get(device_uuid, {}) if self.data else {}
+                has_drive = bool(
+                    previous.get("has_drive")
+                    or device.get("last_drivelog")
+                    or drive_status is not None
+                )
+
                 device_data[device_uuid] = {
                     "device_info": device,
                     "channels": channels,
@@ -352,7 +372,9 @@ class FireBoardDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     "temperatures": {"channels": rest_channels},
                     "session": session,
                     "drive_status": drive_status,
-                    "online": True,
+                    "has_drive": has_drive,
+                    "device_log": device.get("device_log"),
+                    "online": is_device_online(device),
                 }
 
                 # Subscribe to MQTT for this device
@@ -391,6 +413,38 @@ class FireBoardDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         except Exception as err:
             _LOGGER.error("Unexpected error: %s", err)
             raise UpdateFailed(f"Unexpected error: {err}") from err
+
+    async def async_send_drive_command(
+        self,
+        device_uuid: str,
+        command: Callable[[], Awaitable[None]],
+        drivelog_updates: dict[str, Any],
+    ) -> None:
+        """Send a Drive command and reflect it in local state right away.
+
+        Rather than spending an extra API call (of the 17 allowed per 5
+        minutes) on an immediate refresh, patch the device's last_drivelog
+        optimistically; the next regular poll replaces it with what the
+        Drive actually reports.
+
+        Raises:
+            HomeAssistantError: If the command could not be sent.
+
+        """
+        try:
+            await command()
+        except FireBoardApiClientError as err:
+            raise HomeAssistantError(f"FireBoard Drive command failed: {err}") from err
+
+        device_data = (self.data or {}).get(device_uuid)
+        if not device_data:
+            return
+        device_info = device_data.setdefault("device_info", {})
+        drivelog = dict(device_info.get("last_drivelog") or {})
+        drivelog.update(drivelog_updates)
+        drivelog["created"] = datetime.now(timezone.utc).isoformat()
+        device_info["last_drivelog"] = drivelog
+        self.async_set_updated_data(self.data)
 
     async def async_shutdown(self) -> None:
         """Shutdown the coordinator."""

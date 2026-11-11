@@ -71,12 +71,38 @@ While there is an existing [fireboard2mqtt integration](https://github.com/gordl
 1. Go to Settings > Devices & Services
 2. Click "Add Integration"
 3. Search for "FireBoard"
-4. Enter your FireBoard account credentials:
-   - **Email**: Your FireBoard account email
-   - **Password**: Your FireBoard account password
-   - **Polling Interval**: How often to update data (default: 40 seconds)
+4. Sign in with your FireBoard account email and password
 
-**Note**: The minimum polling interval is 40 seconds to respect FireBoard's API rate limit of 17 calls per 5-minute window.
+### Settings
+
+After setup, click **Configure** on the FireBoard integration. A menu opens with three pages:
+
+**General**
+
+| Setting | Default | Description |
+|---|---|---|
+| Update interval | 40 s | How often data is fetched (40-300 s). FireBoard allows 17 API calls per 5 minutes per account. |
+| Low battery warning level | 20 % | Threshold for the **Battery Low** binary sensor and notification. |
+| Allow FireBoard Drive control | On | Adds the Drive target temperature, manual fan speed and Off controls. Turn off for read-only monitoring. |
+
+**Notifications**: no automations needed. Pick where to send them (mobile devices with the Home Assistant Companion app, and/or Home Assistant persistent notifications), then switch on what you want:
+
+| Notification | Default | When |
+|---|---|---|
+| Probe alerts | On | A probe reaches its target, or drops below its minimum |
+| Live cook notification | Off | One silent notification that updates in place with every probe (and the Drive) while cooking; removed when the FireBoard turns off |
+| Drive lid opened | On | The Drive pauses its fan because the lid is open |
+| Device went offline | On | FireBoard Cloud stops hearing from the device (power/WiFi lost) |
+| Battery low | On | Battery drops below the General page's level |
+
+Alerts fire once when a value crosses its limit. They re-arm after the value moves back by 1°, and are not re-sent after a restart. On iOS, alerts are *time-sensitive* (they break through Focus) and live updates are silent. On Android, they use the notification channels "FireBoard alerts" and "FireBoard live", which you can customise in Android settings.
+
+**Probe alerts**: a **target** and a **minimum** temperature for each probe. Leave a probe empty to use the alerts configured in the FireBoard app instead.
+
+**Send test notification**: sends a test alert to every chosen target and shows which ones received it. The same test is available as the **Send Test Notification** button on each FireBoard device page, so you can add it to a dashboard. It works even while the FireBoard is off.
+
+Changing settings reloads the integration. To change your password, use
+**⋮ > Reconfigure** on the integration entry.
 
 ## Entities
 
@@ -90,6 +116,7 @@ While there is an existing [fireboard2mqtt integration](https://github.com/gordl
   - `channel`: Channel number (1-6)
   - `label`: Custom channel label from FireBoard app
   - `target_temp`: Target temperature if set
+  - `alert_min_temp` / `alert_max_temp`: Alert thresholds configured for the channel in the FireBoard app
 
 ### Battery Sensors
 - Battery level percentage for wireless devices
@@ -97,22 +124,32 @@ While there is an existing [fireboard2mqtt integration](https://github.com/gordl
 - Unit: Percent (%)
 
 ### FireBoard Drive Sensors
-- Only created for devices with a FireBoard Drive (fan controller) attached
+- Created for devices where a FireBoard Drive (fan controller) has been seen, either live or in a past cook session. A Drive first detected after setup is added automatically, with no reload needed
 - **Drive Setpoint**: Target temperature, device class `temperature`, unit Celsius or Fahrenheit matching your account's configured unit
 - **Drive Fan**: Fan output percentage, unit %
-- **Drive Mode**: `Auto`, `Manual`, or `Off`, read directly from FireBoard's own labels (not guessed) — refreshed on the same slower cadence as session data
+- **Drive Mode**: `Auto`, `Manual`, or `Off`, decoded from the Drive's `modetype` using the same mapping as the official FireBoard app, so it updates on every poll. Attribute `controlled_channel` shows which probe the Drive follows
 - **Drive Battery Voltage**: The Drive unit's own battery voltage (separate from the main device's battery), unit V
 
-> **Note**: FireBoard's API is read-only — there is no way to *set* the Drive setpoint, mode, or any other value through this integration (or through FireBoard's documented API at all). Changes must be made in the FireBoard app.
+### FireBoard Drive Controls
+Created for Drive-equipped devices unless **Allow FireBoard Drive control** is turned off in the settings. Commands go through the same cloud endpoint the official FireBoard Android app uses (`POST /api/v1/devices/<uuid>/mq.json`). This endpoint is not part of FireBoard's documented API.
+- **Drive Target Temperature** (number): Setting a value switches the Drive to **Auto** at that pit temperature. Setting `0` turns it off.
+- **Drive Manual Fan Speed** (number, 0-100 %): Switches the Drive to **Manual** at a fixed fan speed.
+- **Drive Off** (button): Turns the Drive fan off.
+
+The new value shows right away and is confirmed by the next poll. Each command uses one call of the 17-calls-per-5-minutes API budget.
 
 ### Session Sensor
 - One per device, showing the title of the current or most recently ended cook session (`"No Session"` if none exists yet)
 - Attributes: `session_id`, `start_time`, `end_time`, `duration`, `active`, `description`
 - Refreshed on a slower cadence than temperature data (every 3rd poll) to conserve API rate limit budget
 
+### WiFi Signal (diagnostic, disabled by default)
+- WiFi RSSI in dBm from the device's uploaded device log
+- Attributes: `signal_percent` (same formula as the FireBoard app), `ssid`
+
 ### Binary Sensors
-- **Connectivity**: Device online/offline status
-- **Battery Low**: Alert when battery below 20%
+- **Connectivity**: Online when FireBoard Cloud has heard from the device in the last ~5 minutes (same rule as the FireBoard app). When the device is offline, its live entities become unavailable. The Session sensor stays available.
+- **Battery Low**: On when the battery is below the configured threshold (default 20%)
 - **Drive Lid Paused**: On when FireBoard Drive has paused its fan because it detected the lid open (Drive-equipped devices only)
 
 ## Dashboard Examples

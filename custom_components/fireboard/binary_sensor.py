@@ -12,9 +12,9 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DOMAIN
+from .const import CONF_BATTERY_LOW_THRESHOLD, DEFAULT_BATTERY_LOW_THRESHOLD, DOMAIN
 from .coordinator import FireBoardDataUpdateCoordinator
-from .entity import FireBoardEntity
+from .entity import FireBoardEntity, async_add_drive_entities
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -54,16 +54,15 @@ async def async_setup_entry(
                 )
             )
 
-        # Drive lid-paused sensor, if this device has a Drive attached.
-        if device_info.get("last_drivelog"):
-            entities.append(
-                FireBoardDriveLidPausedSensor(
-                    coordinator,
-                    device_uuid,
-                )
-            )
-
     async_add_entities(entities)
+
+    # Drive lid-paused sensor, added whenever a Drive is detected.
+    async_add_drive_entities(
+        coordinator,
+        config_entry,
+        async_add_entities,
+        lambda device_uuid: [FireBoardDriveLidPausedSensor(coordinator, device_uuid)],
+    )
 
 
 class FireBoardConnectivitySensor(FireBoardEntity, BinarySensorEntity):
@@ -117,6 +116,17 @@ class FireBoardBatteryLowSensor(FireBoardEntity, BinarySensorEntity):
         self._attr_name = f"{self._device_title} Battery Low"
 
     @property
+    def _threshold(self) -> float:
+        """Return the configured low-battery percentage (default 20%)."""
+        entry = getattr(self.coordinator, "config_entry", None)
+        options = getattr(entry, "options", None)
+        if isinstance(options, dict):
+            return options.get(
+                CONF_BATTERY_LOW_THRESHOLD, DEFAULT_BATTERY_LOW_THRESHOLD
+            )
+        return DEFAULT_BATTERY_LOW_THRESHOLD
+
+    @property
     def is_on(self) -> bool:
         """Return true if battery is low.
 
@@ -128,8 +138,8 @@ class FireBoardBatteryLowSensor(FireBoardEntity, BinarySensorEntity):
 
         if battery_reading is not None:
             try:
-                # Consider battery low if below 20%
-                return float(battery_reading) * 100 < 20
+                # Threshold is configurable in the integration's options.
+                return float(battery_reading) * 100 < self._threshold
             except (ValueError, TypeError):
                 _LOGGER.warning(
                     "Invalid battery reading for %s: %s",

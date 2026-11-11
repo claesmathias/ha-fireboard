@@ -151,3 +151,8 @@ Thumbs.db
 test_device_config.json
 output.txt
 
+
+# Local Home Assistant dev instance
+.ha-dev/
+# Decompiled/downloaded app packages
+apk/

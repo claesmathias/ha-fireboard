@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import UnitOfTemperature
@@ -24,6 +24,7 @@ async def test_temperature_sensor_setup(
         "custom_components.fireboard.coordinator.FireBoardDataUpdateCoordinator"
     ) as mock_coordinator_class:
         mock_coordinator = AsyncMock()
+        mock_coordinator.async_add_listener = MagicMock()
         mock_coordinator.data = mock_coordinator_data
         mock_coordinator.last_update_success = True
         mock_coordinator_class.return_value = mock_coordinator
@@ -76,6 +77,8 @@ async def test_sensor_setup_creates_drive_sensors_when_drivelog_present(
     }
 
     mock_coordinator = AsyncMock()
+
+    mock_coordinator.async_add_listener = MagicMock()
     mock_coordinator.data = mock_coordinator_data
     mock_coordinator.last_update_success = True
     hass.data.setdefault(DOMAIN, {})
@@ -613,3 +616,85 @@ async def test_session_sensor_without_a_session(
 
         assert sensor.native_value == "No Session"
         assert sensor.extra_state_attributes == {}
+
+
+async def test_wifi_signal_sensor(hass, mock_coordinator_data):
+    """Test WiFi signal comes from device_log, with percent and SSID attributes."""
+    from custom_components.fireboard.sensor import FireBoardWifiSignalSensor
+
+    coordinator = AsyncMock()
+    coordinator.data = mock_coordinator_data
+    sensor = FireBoardWifiSignalSensor(coordinator, "test-device-uuid-123")
+    assert sensor.native_value is None
+    assert sensor.extra_state_attributes == {}
+
+    mock_coordinator_data["test-device-uuid-123"]["device_log"] = {
+        "signallevel": -60,
+        "ssid": "grill-net",
+    }
+    assert sensor.native_value == -60
+    assert sensor.extra_state_attributes == {"signal_percent": 80, "ssid": "grill-net"}
+
+    mock_coordinator_data["test-device-uuid-123"]["device_log"] = {"signallevel": 0}
+    assert sensor.native_value is None
+
+
+async def test_drive_mode_from_modetype(hass, mock_coordinator_data):
+    """Drive Mode uses the raw modetype, falling back to session detail."""
+    from custom_components.fireboard.sensor import FireBoardDriveModeSensor
+
+    device = mock_coordinator_data["test-device-uuid-123"]
+    device["device_info"]["last_drivelog"] = {
+        "modetype": 1,
+        "setpoint": 0,
+        "driveper": 0.5,
+        "tiedchannel": 2,
+    }
+    device["drive_status"] = {"mode": "Auto", "power_mode": 3}
+    coordinator = AsyncMock()
+    coordinator.data = mock_coordinator_data
+    sensor = FireBoardDriveModeSensor(coordinator, "test-device-uuid-123")
+
+    assert sensor.native_value == "Manual"
+    assert sensor.extra_state_attributes == {"controlled_channel": 2, "power_mode": 3}
+
+    # devices.json dropped the drivelog: fall back to session detail, but
+    # a months-old session mode must read as Off, not "Auto".
+    device["device_info"]["last_drivelog"] = None
+    device["drive_status"] = {"mode": "Auto", "created": "2026-08-09T16:16:11Z"}
+    assert sensor.native_value == "Off"
+    device["drive_status"] = {"mode": "Auto", "created": None}
+    assert sensor.native_value == "Auto"
+    device["drive_status"] = None
+    assert sensor.native_value == "Unknown"
+
+
+async def test_temperature_alert_attributes(hass, mock_coordinator_data):
+    """Channel alert thresholds from the FireBoard app become attributes."""
+    from custom_components.fireboard.sensor import FireBoardTemperatureSensor
+
+    channels = mock_coordinator_data["test-device-uuid-123"]["device_info"]["channels"]
+    channels[0]["alerts"] = [
+        "junk",
+        {"temp_min": 200, "temp_max": None},
+        {"temp_max": 275},
+    ]
+    coordinator = AsyncMock()
+    coordinator.data = mock_coordinator_data
+    sensor = FireBoardTemperatureSensor(coordinator, "test-device-uuid-123", 1)
+    attrs = sensor.extra_state_attributes
+    assert attrs["alert_min_temp"] == 200
+    assert attrs["alert_max_temp"] == 275
+
+
+async def test_session_sensor_available_when_device_offline(
+    hass, mock_coordinator_data
+):
+    """The last session stays visible after the device powers off."""
+    from custom_components.fireboard.sensor import FireBoardSessionSensor
+
+    mock_coordinator_data["test-device-uuid-123"]["online"] = False
+    coordinator = AsyncMock()
+    coordinator.data = mock_coordinator_data
+    coordinator.last_update_success = True
+    assert FireBoardSessionSensor(coordinator, "test-device-uuid-123").available
