@@ -318,9 +318,7 @@ class FireBoardNotifier:
             message,
             tag=tag,
             live=True,
-            extra_data=live_activity_fields(
-                data, device_uuid, self._options.get(CONF_PROBE_ALERTS) or {}
-            ),
+            extra_data=live_activity_fields(data),
         )
         state.live_message = message
         if state.live_started is None:
@@ -432,15 +430,16 @@ def live_message(data: dict[str, Any]) -> str | None:
     return ", ".join(parts)
 
 
-def live_activity_fields(
-    data: dict[str, Any], device_uuid: str, overrides: dict[str, Any]
-) -> dict[str, Any]:
-    """Return the Live Activity extras: compact text and target progress.
+def live_activity_fields(data: dict[str, Any]) -> dict[str, Any]:
+    """Return the Live Activity's compact text.
 
     critical_text is the short value shown in the Dynamic Island / Android
     status bar chip: the pit ("Grill"/"Pit"/"Ambient") probe if labelled as
-    such, else the first probe with a reading. The progress bar tracks the
-    first probe that has a target temperature.
+    such, else the first probe with a reading.
+
+    No progress bar is sent: progress in temperature doesn't reflect cook
+    time (meat slows down near the end and can stall for hours), so it
+    would be misleading.
     """
     readings = {
         ch.get("channel"): ch for ch in data.get("temperatures", {}).get("channels", [])
@@ -456,10 +455,6 @@ def live_activity_fields(
         label = (channel_config.get("channel_label") or "").lower()
         if compact is None or any(w in label for w in ("grill", "pit", "ambient")):
             compact = _fmt(temp, unit)
-        _, target = probe_thresholds(overrides, device_uuid, channel_config)
-        if target and target > 0 and "progress" not in fields:
-            fields["progress"] = int(min(max(temp, 0), target))
-            fields["progress_max"] = int(target)
     if compact:
         fields["critical_text"] = compact
     return fields

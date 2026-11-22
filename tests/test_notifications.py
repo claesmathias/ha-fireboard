@@ -254,7 +254,7 @@ def test_app_alert_thresholds():
 
 
 async def test_live_status_is_a_live_activity(setup):
-    """Live status carries live_update plus compact text and target progress."""
+    """Live status carries live_update and compact text, but no progress bar."""
     notifier, coordinator, hass = setup
     notifier.entry.options = {
         CONF_NOTIFY_TARGETS: ["mobile_app_phone"],
@@ -267,8 +267,8 @@ async def test_live_status_is_a_live_activity(setup):
     assert data["tag"] == f"fireboard_live_{UUID}"
     assert data["silent"] is True
     assert data["critical_text"] == "110°C"  # the probe labelled "Grill"
-    assert data["progress"] == 70
-    assert data["progress_max"] == 90
+    assert "progress" not in data
+    assert "progress_max" not in data
 
 
 async def test_live_activity_restarts_before_ios_8_hour_limit(setup):
@@ -293,9 +293,9 @@ async def test_live_activity_restarts_before_ios_8_hour_limit(setup):
 
 
 def test_live_activity_fields_without_target_or_readings():
-    """No target -> no progress bar; no readings -> nothing extra."""
+    """Compact text from the first reading; no readings -> nothing extra."""
     from custom_components.fireboard.notifications import live_activity_fields
 
     data = _data({1: 70})[UUID]
-    assert live_activity_fields(data, UUID, {}) == {"critical_text": "70°C"}
-    assert live_activity_fields(_data()[UUID], UUID, {}) == {}
+    assert live_activity_fields(data) == {"critical_text": "70°C"}
+    assert live_activity_fields(_data()[UUID]) == {}

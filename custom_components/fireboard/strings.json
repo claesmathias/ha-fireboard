@@ -78,7 +78,7 @@
         "data_description": {
           "notify_targets": "Mobile devices running the Home Assistant Companion app, and/or Home Assistant persistent notifications.",
           "notify_probe_alerts": "Sent when a probe reaches its target temperature or falls below its minimum temperature. Thresholds are configured under Probe alerts or in the FireBoard app.",
-          "notify_live": "Shows current probe temperatures, progress towards the target temperature and Drive status on the iPhone Lock Screen and Dynamic Island (Live Activity), or as an Android 16 Live Update. It is updated silently every poll and ends when the device goes offline. Requires iOS 17.2 or later, with Live Activities allowed for the Home Assistant app in iOS Settings.",
+          "notify_live": "Shows current probe temperatures and Drive status on the iPhone Lock Screen and Dynamic Island (Live Activity), or as an Android 16 Live Update. It is updated silently every poll and ends when the device goes offline. Requires iOS 17.2 or later, with Live Activities allowed for the Home Assistant app in iOS Settings.",
           "notify_lid": "Sent when the FireBoard Drive pauses its fan because an open lid has been detected.",
           "notify_offline": "Sent when FireBoard Cloud no longer receives data from the device.",
           "notify_battery": "Sent when the battery level falls below the threshold configured under General."

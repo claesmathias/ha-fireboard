@@ -90,7 +90,7 @@ After setup, click **Configure** on the FireBoard integration. A menu opens with
 | Notification | Default | When |
 |---|---|---|
 | Probe alerts | On | A probe reaches its target, or drops below its minimum |
-| Live cook status (Live Activity) | Off | An iOS Live Activity (Lock Screen and Dynamic Island) or Android 16 Live Update with all probe temperatures, progress towards the target and Drive status, updated silently every poll; ends when the FireBoard turns off |
+| Live cook status (Live Activity) | Off | An iOS Live Activity (Lock Screen and Dynamic Island) or Android 16 Live Update with all probe temperatures and Drive status, updated silently every poll; ends when the FireBoard turns off |
 | Drive lid opened | On | The Drive pauses its fan because the lid is open |
 | Device went offline | On | FireBoard Cloud stops hearing from the device (power/WiFi lost) |
 | Battery low | On | Battery drops below the General page's level |
