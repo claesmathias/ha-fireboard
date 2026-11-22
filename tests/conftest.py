@@ -42,6 +42,9 @@ except ImportError:
     sys.modules["homeassistant.components.number"] = homeassistant.components.number
     sys.modules["homeassistant.components.button"] = homeassistant.components.button
     sys.modules["homeassistant.helpers.selector"] = homeassistant.helpers.selector
+    sys.modules["homeassistant.helpers.issue_registry"] = (
+        homeassistant.helpers.issue_registry
+    )
     sys.modules["voluptuous"] = voluptuous
 
     from homeassistant.core import HomeAssistant

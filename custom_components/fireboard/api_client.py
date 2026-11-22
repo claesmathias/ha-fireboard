@@ -121,7 +121,10 @@ class FireBoardApiClient:
                     },
                 )
 
-                if response.status == 401:
+                # FireBoard (django-rest-auth) answers a wrong email or
+                # password with 400 {"non_field_errors": ["Unable to log in
+                # with provided credentials."]}, not 401.
+                if response.status in (400, 401, 403):
                     raise FireBoardApiClientAuthenticationError(
                         "Invalid email or password"
                     )

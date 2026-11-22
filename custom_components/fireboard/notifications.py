@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
@@ -47,13 +48,22 @@ ALERT_DATA = {
     "channel": "FireBoard alerts",
 }
 LIVE_DATA = {
-    # Update silently in place; Android keeps it pinned while cooking.
-    "push": {"interruption-level": "passive"},
-    "alert_once": True,
+    # live_update turns the notification into an iOS Live Activity (Lock
+    # Screen / Dynamic Island) or an Android 16 Live Update; resending with
+    # the same tag updates it in place. Requires Home Assistant 2026.7+.
+    "live_update": True,
+    "silent": True,  # iOS: quiet, low-priority updates
+    "alert_once": True,  # Android: sound only when it starts
     "sticky": True,
-    "persistent": True,
+    "notification_icon": "mdi:grill",
+    "notification_icon_color": "#E8A00C",
+    "color": "#E8A00C",
     "channel": "FireBoard live",
 }
+
+# iOS ends a Live Activity after at most 8 hours; restart it a little
+# before that so long cooks (brisket, pork shoulder) stay visible.
+LIVE_ACTIVITY_MAX_AGE = timedelta(hours=7, minutes=45)
 
 
 def probe_key(device_uuid: str, channel: int) -> str:
@@ -72,6 +82,20 @@ def app_alert_thresholds(channel_config: dict[str, Any]) -> tuple[Any, Any]:
         if high is None and alert.get("temp_max") is not None:
             high = alert["temp_max"]
     return low, high
+
+
+def probe_thresholds(
+    overrides: dict[str, Any], device_uuid: str, channel_config: dict[str, Any]
+) -> tuple[float | None, float | None]:
+    """Return a probe's (minimum, target): set in HA, else from the app."""
+    key = probe_key(device_uuid, channel_config.get("channel"))
+    if key in overrides:
+        return (
+            _to_float(overrides[key].get("min")),
+            _to_float(overrides[key].get("max")),
+        )
+    app_low, app_high = app_alert_thresholds(channel_config)
+    return _to_float(app_low), _to_float(app_high)
 
 
 def _to_float(value: Any) -> float | None:
@@ -103,6 +127,7 @@ class _DeviceState:
     lid_paused: bool | None = None
     battery_low: bool | None = None
     live_message: str | None = None
+    live_started: datetime | None = None
     probes: dict[int, _ProbeState] = field(default_factory=dict)
 
 
@@ -185,13 +210,7 @@ class FireBoardNotifier:
             if temp is None:
                 continue
 
-            key = probe_key(device_uuid, channel)
-            if key in overrides:
-                low = _to_float(overrides[key].get("min"))
-                high = _to_float(overrides[key].get("max"))
-            else:
-                app_low, app_high = app_alert_thresholds(channel_config)
-                low, high = _to_float(app_low), _to_float(app_high)
+            low, high = probe_thresholds(overrides, device_uuid, channel_config)
 
             unit = "°C" if reading.get("degreetype") == 1 else "°F"
             label = channel_config.get("channel_label") or f"Probe {channel}"
@@ -280,15 +299,32 @@ class FireBoardNotifier:
             if state.live_message is not None:
                 await self._clear(tag)
                 state.live_message = None
+                state.live_started = None
             return
+
+        now = datetime.now(timezone.utc)
+        if state.live_started and now - state.live_started > LIVE_ACTIVITY_MAX_AGE:
+            await self._clear(tag)
+            state.live_message = None
+            state.live_started = None
 
         if message == state.live_message:
             return
         session = data.get("session") or {}
         active = bool(session) and session.get("end_time") is None
         live_title = (session.get("title") if active else None) or title
-        await self._send(live_title, message, tag=tag, live=True)
+        await self._send(
+            live_title,
+            message,
+            tag=tag,
+            live=True,
+            extra_data=live_activity_fields(
+                data, device_uuid, self._options.get(CONF_PROBE_ALERTS) or {}
+            ),
+        )
         state.live_message = message
+        if state.live_started is None:
+            state.live_started = now
 
     async def async_send_test(self) -> tuple[list[str], list[str]]:
         """Send a test alert to every configured target.
@@ -306,10 +342,16 @@ class FireBoardNotifier:
         return delivered, failed
 
     async def _send(
-        self, title: str, message: str, *, tag: str, live: bool = False
+        self,
+        title: str,
+        message: str,
+        *,
+        tag: str,
+        live: bool = False,
+        extra_data: dict[str, Any] | None = None,
     ) -> list[str]:
         """Send to every target; return the targets that failed."""
-        extra = LIVE_DATA if live else ALERT_DATA
+        extra = {**(LIVE_DATA if live else ALERT_DATA), **(extra_data or {})}
         failed: list[str] = []
         for target in self.targets:
             try:
@@ -388,3 +430,36 @@ def live_message(data: dict[str, Any]) -> str | None:
         parts.append(f"Drive fan {fan * 100:.0f}%")
 
     return ", ".join(parts)
+
+
+def live_activity_fields(
+    data: dict[str, Any], device_uuid: str, overrides: dict[str, Any]
+) -> dict[str, Any]:
+    """Return the Live Activity extras: compact text and target progress.
+
+    critical_text is the short value shown in the Dynamic Island / Android
+    status bar chip: the pit ("Grill"/"Pit"/"Ambient") probe if labelled as
+    such, else the first probe with a reading. The progress bar tracks the
+    first probe that has a target temperature.
+    """
+    readings = {
+        ch.get("channel"): ch for ch in data.get("temperatures", {}).get("channels", [])
+    }
+    fields: dict[str, Any] = {}
+    compact: str | None = None
+    for channel_config in data.get("device_info", {}).get("channels", []):
+        reading = readings.get(channel_config.get("channel")) or {}
+        temp = _to_float(reading.get("current_temp"))
+        if temp is None:
+            continue
+        unit = "°C" if reading.get("degreetype") == 1 else "°F"
+        label = (channel_config.get("channel_label") or "").lower()
+        if compact is None or any(w in label for w in ("grill", "pit", "ambient")):
+            compact = _fmt(temp, unit)
+        _, target = probe_thresholds(overrides, device_uuid, channel_config)
+        if target and target > 0 and "progress" not in fields:
+            fields["progress"] = int(min(max(temp, 0), target))
+            fields["progress_max"] = int(target)
+    if compact:
+        fields["critical_text"] = compact
+    return fields

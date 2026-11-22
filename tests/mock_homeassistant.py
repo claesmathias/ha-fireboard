@@ -154,9 +154,15 @@ class ConfigFlow:
             if entry.unique_id == self.unique_id:
                 raise AbortFlow("already_configured")
 
-    def async_show_form(self, step_id, data_schema=None, errors=None):
+    def async_show_form(
+        self, step_id, data_schema=None, errors=None, description_placeholders=None
+    ):
         """Mock async_show_form method."""
-        data = {"step_id": step_id, "data_schema": data_schema}
+        data = {
+            "step_id": step_id,
+            "data_schema": data_schema,
+            "description_placeholders": description_placeholders,
+        }
         if errors:
             data["errors"] = errors
         return FlowResult("test_flow", FlowResultType.FORM, data)
@@ -377,6 +383,35 @@ class ConfigEntryNotReady(Exception):
     pass
 
 
+class IssueSeverity:
+    """Mock issue_registry.IssueSeverity."""
+
+    CRITICAL = "critical"
+    ERROR = "error"
+    WARNING = "warning"
+
+
+def _issues(hass):
+    if not hasattr(hass, "_mock_issues"):
+        hass._mock_issues = {}
+    return hass._mock_issues
+
+
+def async_create_issue(hass, domain, issue_id, **kwargs):
+    """Mock issue_registry.async_create_issue."""
+    _issues(hass)[(domain, issue_id)] = kwargs
+
+
+def async_delete_issue(hass, domain, issue_id):
+    """Mock issue_registry.async_delete_issue."""
+    _issues(hass).pop((domain, issue_id), None)
+
+
+def async_get_issue_registry(hass):
+    """Mock issue_registry.async_get."""
+    return MockModule(issues=_issues(hass))
+
+
 class HomeAssistantError(Exception):
     """Mock HomeAssistantError exception."""
 
@@ -583,6 +618,12 @@ homeassistant = MockModule(
             CoordinatorEntity=CoordinatorEntity,
         ),
         selector=MockSelectorModule(),
+        issue_registry=MockModule(
+            IssueSeverity=IssueSeverity,
+            async_create_issue=async_create_issue,
+            async_delete_issue=async_delete_issue,
+            async_get=async_get_issue_registry,
+        ),
         aiohttp_client=MockModule(
             async_get_clientsession=lambda hass: MagicMock(),
         ),

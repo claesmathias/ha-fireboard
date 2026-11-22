@@ -70,7 +70,7 @@
         "data": {
           "notify_targets": "Recipients",
           "notify_probe_alerts": "Probe temperature alerts",
-          "notify_live": "Live cook status",
+          "notify_live": "Live cook status (Live Activity)",
           "notify_lid": "Drive paused (lid open)",
           "notify_offline": "Device offline",
           "notify_battery": "Low battery"
@@ -78,7 +78,7 @@
         "data_description": {
           "notify_targets": "Mobile devices running the Home Assistant Companion app, and/or Home Assistant persistent notifications.",
           "notify_probe_alerts": "Sent when a probe reaches its target temperature or falls below its minimum temperature. Thresholds are configured under Probe alerts or in the FireBoard app.",
-          "notify_live": "A single notification, updated silently with current probe temperatures and Drive status while the device is active. It is removed when the device goes offline.",
+          "notify_live": "Shows current probe temperatures, progress towards the target temperature and Drive status on the iPhone Lock Screen and Dynamic Island (Live Activity), or as an Android 16 Live Update. It is updated silently every poll and ends when the device goes offline. Requires iOS 17.2 or later, with Live Activities allowed for the Home Assistant app in iOS Settings.",
           "notify_lid": "Sent when the FireBoard Drive pauses its fan because an open lid has been detected.",
           "notify_offline": "Sent when FireBoard Cloud no longer receives data from the device.",
           "notify_battery": "Sent when the battery level falls below the threshold configured under General."
@@ -97,6 +97,12 @@
     },
     "error": {
       "temperature_out_of_range": "Enter a temperature between 0 and 1000."
+    }
+  },
+  "issues": {
+    "cloud_unreachable": {
+      "title": "Connection to FireBoard Cloud lost",
+      "description": "Home Assistant has been unable to retrieve data from FireBoard Cloud for {account} for several consecutive updates. FireBoard entities are unavailable until the connection is restored.\n\nLast error: {error}\n\nCheck the internet connection of the Home Assistant host. If the error refers to the credentials, update them via **Settings → Devices & services → FireBoard → ⋮ → Reconfigure**. If it refers to the rate limit, increase the update interval under **Configure → General**.\n\nThis warning is removed automatically once the connection is restored."
     }
   }
 }

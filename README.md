@@ -90,10 +90,12 @@ After setup, click **Configure** on the FireBoard integration. A menu opens with
 | Notification | Default | When |
 |---|---|---|
 | Probe alerts | On | A probe reaches its target, or drops below its minimum |
-| Live cook notification | Off | One silent notification that updates in place with every probe (and the Drive) while cooking; removed when the FireBoard turns off |
+| Live cook status (Live Activity) | Off | An iOS Live Activity (Lock Screen and Dynamic Island) or Android 16 Live Update with all probe temperatures, progress towards the target and Drive status, updated silently every poll; ends when the FireBoard turns off |
 | Drive lid opened | On | The Drive pauses its fan because the lid is open |
 | Device went offline | On | FireBoard Cloud stops hearing from the device (power/WiFi lost) |
 | Battery low | On | Battery drops below the General page's level |
+
+Live Activities require Home Assistant 2026.7 or later, iOS 17.2 or later, and **Settings → Home Assistant → Live Activities** enabled on the iPhone. iOS ends a Live Activity after 8 hours, so the integration starts a new one shortly before then during long cooks.
 
 Alerts fire once when a value crosses its limit. They re-arm after the value moves back by 1°, and are not re-sent after a restart. On iOS, alerts are *time-sensitive* (they break through Focus) and live updates are silent. On Android, they use the notification channels "FireBoard alerts" and "FireBoard live", which you can customise in Android settings.
 
@@ -272,6 +274,10 @@ automation:
 ```
 
 ## Troubleshooting
+
+### Connection to FireBoard Cloud lost
+
+When Home Assistant cannot retrieve data from FireBoard Cloud for 3 consecutive updates, a warning appears under **Settings → System → Repairs**. It shows the last error, for example a network failure, rejected credentials or the API rate limit. The warning is removed automatically once the connection is restored.
 
 ### Authentication Errors
 

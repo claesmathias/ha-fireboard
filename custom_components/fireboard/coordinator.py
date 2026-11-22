@@ -11,11 +11,13 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_EMAIL, CONF_PASSWORD
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .api_client import (
     FireBoardApiClient,
+    FireBoardApiClientAuthenticationError,
     FireBoardApiClientCommunicationError,
     FireBoardApiClientError,
     FireBoardApiClientRateLimitError,
@@ -33,6 +35,10 @@ _LOGGER = logging.getLogger(__name__)
 # slowly than temperatures do.
 SESSION_POLL_EVERY_N_REFRESHES = 3
 
+# Consecutive failed updates before a Repairs issue is raised, so a single
+# dropped request doesn't produce a warning in Settings.
+FAILURES_BEFORE_ISSUE = 3
+
 
 class FireBoardDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     """Class to manage fetching data from FireBoard API and MQTT."""
@@ -47,6 +53,8 @@ class FireBoardDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.mqtt_client: FireBoardMQTTClient | None = None
         self._subscribed_devices: set[str] = set()
         self._refresh_count = 0
+        self.consecutive_failures = 0
+        self.last_error: str | None = None
 
         # Create API client
         session = async_get_clientsession(hass)
@@ -204,6 +212,55 @@ class FireBoardDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return None
 
     async def _async_update_data(self) -> dict[str, Any]:
+        """Fetch data, and warn in Repairs while FireBoard Cloud is unreachable.
+
+        After FAILURES_BEFORE_ISSUE consecutive failed updates, a warning is
+        shown under Settings > System > Repairs with the last error. It is
+        removed automatically by the first successful update.
+
+        Raises:
+            UpdateFailed: If the update fails.
+
+        """
+        try:
+            data = await self._async_fetch_data()
+        except FireBoardApiClientAuthenticationError as err:
+            self._record_failure(str(err))
+            raise UpdateFailed(f"Authentication failed: {err}") from err
+        except UpdateFailed as err:
+            self._record_failure(str(err.__cause__ or err))
+            raise
+
+        if self.consecutive_failures:
+            _LOGGER.info("Connection to FireBoard Cloud restored")
+        self.consecutive_failures = 0
+        self.last_error = None
+        ir.async_delete_issue(self.hass, DOMAIN, self._issue_id)
+        return data
+
+    @property
+    def _issue_id(self) -> str:
+        return f"cloud_unreachable_{self.config_entry.entry_id}"
+
+    def _record_failure(self, error: str) -> None:
+        self.consecutive_failures += 1
+        self.last_error = error
+        if self.consecutive_failures < FAILURES_BEFORE_ISSUE:
+            return
+        ir.async_create_issue(
+            self.hass,
+            DOMAIN,
+            self._issue_id,
+            is_fixable=False,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key="cloud_unreachable",
+            translation_placeholders={
+                "account": self.config_entry.title,
+                "error": error,
+            },
+        )
+
+    async def _async_fetch_data(self) -> dict[str, Any]:
         """Update device list via REST API.
 
         MQTT handles real-time temperature updates, so this just refreshes
@@ -404,6 +461,8 @@ class FireBoardDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
             return device_data
 
+        except FireBoardApiClientAuthenticationError:
+            raise
         except FireBoardApiClientRateLimitError as err:
             _LOGGER.error("Rate limit exceeded: %s", err)
             raise UpdateFailed(f"Rate limit exceeded: {err}") from err

@@ -251,3 +251,51 @@ def test_app_alert_thresholds():
         9,
     )
     assert app_alert_thresholds({}) == (None, None)
+
+
+async def test_live_status_is_a_live_activity(setup):
+    """Live status carries live_update plus compact text and target progress."""
+    notifier, coordinator, hass = setup
+    notifier.entry.options = {
+        CONF_NOTIFY_TARGETS: ["mobile_app_phone"],
+        CONF_NOTIFY_LIVE: True,
+        CONF_PROBE_ALERTS: {f"{UUID}:1": {"max": 90}},
+    }
+    await _run(notifier, coordinator, _data({1: 70, 2: 110}))
+    data = hass.services.async_call.call_args.args[2]["data"]
+    assert data["live_update"] is True
+    assert data["tag"] == f"fireboard_live_{UUID}"
+    assert data["silent"] is True
+    assert data["critical_text"] == "110°C"  # the probe labelled "Grill"
+    assert data["progress"] == 70
+    assert data["progress_max"] == 90
+
+
+async def test_live_activity_restarts_before_ios_8_hour_limit(setup):
+    """Long cooks get a fresh Live Activity before iOS ends the old one."""
+    from datetime import datetime, timedelta, timezone
+
+    notifier, coordinator, hass = setup
+    notifier.entry.options = {
+        CONF_NOTIFY_TARGETS: ["mobile_app_phone"],
+        CONF_NOTIFY_LIVE: True,
+    }
+    await _run(notifier, coordinator, _data({1: 70}))
+    state = notifier._devices[UUID]
+    state.live_started = datetime.now(timezone.utc) - timedelta(hours=8)
+    hass.services.async_call.reset_mock()
+
+    await _run(notifier, coordinator, _data({1: 70}))
+    calls = [c.args[2] for c in hass.services.async_call.call_args_list]
+    assert calls[0]["message"] == "clear_notification"
+    assert calls[1]["data"]["live_update"] is True
+    assert datetime.now(timezone.utc) - state.live_started < timedelta(minutes=1)
+
+
+def test_live_activity_fields_without_target_or_readings():
+    """No target -> no progress bar; no readings -> nothing extra."""
+    from custom_components.fireboard.notifications import live_activity_fields
+
+    data = _data({1: 70})[UUID]
+    assert live_activity_fields(data, UUID, {}) == {"critical_text": "70°C"}
+    assert live_activity_fields(_data()[UUID], UUID, {}) == {}
